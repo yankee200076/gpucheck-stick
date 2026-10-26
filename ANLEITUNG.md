@@ -30,8 +30,7 @@ Laufwerk müsse formatiert werden – **nicht formatieren**, das ist die Linux-P
   **Jeden 8-Pin-Stecker mit einem eigenen Kabel** vom Netzteil anschließen, keine Y-Kabel.
 - Im BIOS des Test-PCs einmalig einstellen:
   - **Boot-Modus: UEFI** (CSM/Legacy aus)
-  - **Secure Boot: AUS**, wenn du die **VRAM-Temperatur** sehen willst. Das ist bei der 3090 wichtig.
-    Dafür vorher einmal (mit Internet) das Icon **„VRAM-Temperatur nachrüsten“** starten, siehe unten.
+  - **Secure Boot: AUS**, wenn du **VRAM- und Hotspot-Temperatur** sehen willst. Das ist bei der 3090 wichtig.
     Mit Secure Boot AN läuft alles andere trotzdem: Treiber und Bootloader sind signiert.
   - Above 4G Decoding / Resizable BAR: egal
 - Monitor-Kabel (DP und HDMI) mitnehmen. **Den Monitor an die Testkarte anschließen,
@@ -53,7 +52,7 @@ Laufwerk müsse formatiert werden – **nicht formatieren**, das ist die Linux-P
 
 ## 3. Test starten
 
-Auf dem Desktop doppelklicken:
+Auf dem Desktop doppelklicken – die beiden Tests liegen **oben links**, alles andere rechts:
 
 | Icon | Dauer | Inhalt |
 |---|---|---|
@@ -63,7 +62,6 @@ Auf dem Desktop doppelklicken:
 | Reports öffnen | – | Ordner mit allen Reports |
 | Chromium | – | Browser |
 | Claude Code / opencode | – | KI-Assistent im Terminal (Fehlersuche, braucht Internet) |
-| VRAM-Temperatur nachrüsten | 1–2 Min. | einmalig, braucht Internet – siehe Abschnitt 8 |
 
 Fragt der Desktop beim ersten Doppelklick „Nicht vertrauenswürdiger Starter“,
 dann **„Ausführen markieren“** wählen.
@@ -102,6 +100,7 @@ Am Ende erscheinen ein Fenster und die Terminalausgabe mit einer Zeile pro Prüf
 | CUDA-Rechenfehler | GPU rechnet falsch (instabil/defekt) |
 | GPU-Temperatur | Kühler, Wärmeleitpaste, Montage |
 | VRAM-Temperatur | Wärmeleitpads verschlissen (3090: Rückseite!) |
+| Hotspot-Temperatur / -Abstand | Wärmeleitpaste ausgetrocknet/ausgepumpt, Kühler sitzt schief |
 | Throttle-Gründe | HW-Slowdown/Power-Brake: Stromversorgung, Stecker, Spannungswandler |
 | Leistungsaufnahme | Karte zieht keine Volllast (Strommess-/VRM-Problem) |
 | Lüfter | Lüfter steht oder läuft nicht hoch |
@@ -123,8 +122,9 @@ Windows/macOS lesbar), z. B. `2026-10-25_143012_NVIDIA_GeForce_RTX_3090/`:
 - Geruch (verschmortes Bauteil), sichtbare Schäden, fehlende Schrauben, Garantiesiegel:
   ansehen. Eine Taschenlampe hilft beim Prüfen der PCIe-Kontakte und Stromstecker
   auf Verfärbung.
-- **Hotspot-Temperatur**: NVIDIA stellt sie unter Linux für GeForce nicht bereit.
-  Ein hoher Hotspot-Abstand fällt indirekt durch Drosselung auf („Throttle-Gründe“/„Takt unter Last“).
+- **Hotspot- und VRAM-Temperatur bei Secure Boot AN**: Das Messwerkzeug braucht direkten
+  Speicherzugriff, den Secure Boot sperrt. Dann stehen beide Punkte auf SKIP.
+- **Hotspot/VRAM bei RTX 3070 und RTX 5060**: vom Messwerkzeug (noch) nicht unterstützt.
 - **Langzeitstabilität** (Stunden): Dafür reicht kein Test beim Verkäufer.
 - Seriennummer: GeForce-Karten melden sie meist nicht (`N/A`). Den Aufkleber auf der Karte prüfen.
 
@@ -135,6 +135,8 @@ Windows/macOS lesbar), z. B. `2026-10-25_143012_NVIDIA_GeForce_RTX_3090/`:
 | GPU-Temperatur unter Last | ≥ 81 °C | ≥ 87 °C |
 | VRAM GDDR6X (Ampere 3080/3090) | ≥ 100 °C | ≥ 106 °C |
 | VRAM GDDR6/GDDR6X (Ada), GDDR7 (Blackwell) | ≥ 90 °C | ≥ 100 °C |
+| Hotspot-Temperatur | ≥ 95 °C | ≥ 105 °C |
+| Hotspot-Abstand zum Kern (Ø unter Last) | ≥ 20 °C | ≥ 30 °C |
 | Leistung unter CUDA-Last | < 75 % Power-Limit | < 50 % |
 | SM-Takt unter Last | < Basistakt | < 85 % Basistakt |
 | SW-Thermal-Drosselung | ≥ 10 % der Zeit | – |
@@ -163,10 +165,6 @@ Gehäuse liegen die Werte einige Grad höher.
   öffnet sich Chromium zur Anmeldung (eigenes Claude-Konto nötig). Claude liest `~/CLAUDE.md` und kennt damit
   Aufbau, Werkzeuge und Pfade des Sticks.
 - **opencode**: Icon oder `opencode` im Terminal (enthält kostenlose Modelle, Anmeldung optional).
-- **VRAM-Temperatur nachrüsten**: Das Messwerkzeug *gddr6* hat keine Lizenz und darf deshalb nicht
-  im Image liegen. Das Icon lädt es vom Original-Projekt (github.com/olealgoritme/gddr6) und baut es
-  auf dem Stick – **einmal zu Hause mit Internet erledigen**, danach funktioniert es offline.
-  Ohne das Werkzeug meldet der Test bei der VRAM-Temperatur „SKIP“.
 - Die Anmeldedaten bleiben auf dem Stick gespeichert. Wer den Stick hat, hat Zugriff
   auf dein Konto. Bei Verlust in den Konto-Einstellungen abmelden.
 
@@ -175,8 +173,9 @@ Gehäuse liegen die Werte einige Grad höher.
 - Ubuntu 26.04 LTS, Kernel 7.0 (generic), NVIDIA 595.99.02 open (signiert von Canonical)
 - memtest_vulkan v0.5.0 (GpuZelenograd, Prebuilt)
 - gpu-burn (wilicc, Commit 0d19c94, gebaut mit CUDA 13.4 für sm_86/sm_89/sm_120 + PTX; Bibliotheken liegen in `/opt/gpucheck/gpu-burn/lib`)
-- gddr6 (olealgoritme, Commit 586c77a): VRAM-Temperatur, **per Icon nachzurüsten**, braucht `iomem=relaxed` (gesetzt) und Secure Boot AUS
+- gputemps (ThomasBaruzier/gddr6-core-junction-vram-temps, Commit 6d8c5ec, Apache-2.0): VRAM- und Hotspot-Temperatur,
+  braucht `iomem=relaxed` (gesetzt) und Secure Boot AUS
 - vkmark, glmark2, nvtop, nvidia-smi, nvidia-settings, stress-ng, lm-sensors
 - Chromium 156 (xtradeb-PPA, deb statt Snap), opencode 1.19.4; Claude Code wird beim ersten Aufruf installiert
-- gpu-check.sh 1.3: auf echter RTX 3090 getestet (Kartenerkennung, Basistakt-Tabelle für Treiber 59x,
+- gpu-check.sh 1.4: auf echter RTX 3090 getestet (Kartenerkennung, Basistakt-Tabelle für Treiber 59x,
   Lüfter-RPM, vkmark-Ende, Auswertung nur unter Last)

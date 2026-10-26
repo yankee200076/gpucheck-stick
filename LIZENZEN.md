@@ -9,6 +9,7 @@ Das Image `gpucheck.img.xz` ist eine Zusammenstellung. Jeder Bestandteil steht u
 | NVIDIA-Kernelmodule (open) | 595.99.02 | MIT / GPL-2.0 (dual) | Ubuntu-Paket `linux-modules-nvidia-595-open-generic` |
 | NVIDIA-Treiber (Userspace, nvidia-smi, nvidia-settings) | 595.99.02 | NVIDIA-Softwarelizenz; unverändert aus den Ubuntu-Paketquellen (`restricted`) | Ubuntu-Paket `nvidia-driver-595-open` |
 | CUDA-Laufzeit `libcudart`, `libcublas`, `libcublasLt` | 13.4 | NVIDIA CUDA EULA – als „redistributable“ freigegeben (Anhang A) | developer.nvidia.com/cuda |
+| gputemps (VRAM-/Hotspot-Temperatur) | Commit 6d8c5ec | Apache-2.0; Lizenztext im Image unter `/usr/share/doc/gputemps/`, Quellcode unter `/opt/gpucheck/src/` | github.com/ThomasBaruzier/gddr6-core-junction-vram-temps |
 | memtest_vulkan | 0.5.0 | Zlib | github.com/GpuZelenograd/memtest_vulkan |
 | gpu-burn | Commit 0d19c94 | BSD-2-Clause; Quellcode mit Lizenztext im Image unter `/opt/gpucheck/src/` | github.com/wilicc/gpu-burn |
 | Chromium | 156 | BSD-3-Clause u. a. | xtradeb-PPA (Ubuntu-Build) |
@@ -17,9 +18,8 @@ Das Image `gpucheck.img.xz` ist eine Zusammenstellung. Jeder Bestandteil steht u
 
 ## Nicht im Image enthalten
 
-- **gddr6** (VRAM-Temperatur, github.com/olealgoritme/gddr6): Das Projekt hat **keine Lizenz**, darf also
-  nicht weiterverbreitet werden. Das Icon „VRAM-Temperatur nachrüsten“ lädt den Quellcode beim Nutzer
-  direkt vom Original-Projekt und baut ihn dort (`build/gddr6-nachruesten.sh`).
+- **gddr6** (github.com/olealgoritme/gddr6): hat **keine Lizenz** und ist deshalb nicht enthalten; ersetzt
+  durch gputemps (Apache-2.0), das gddr6 als Quelle für die Register-Adressen nennt.
 - **Claude Code**: proprietär; wird beim ersten Aufruf von `claude` vom Hersteller installiert.
 
 Die Einschätzungen zu NVIDIA-Treiber und CUDA beruhen auf den Lizenztexten der Hersteller und darauf,

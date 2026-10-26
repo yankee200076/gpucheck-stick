@@ -19,7 +19,7 @@ gibt es ein **PASS / WARN / FAIL** mit Begründung und einen Report auf dem Stic
 | CUDA-Volllast mit Rechenfehler-Prüfung | [gpu-burn](https://github.com/wilicc/gpu-burn) |
 | Grafiklast (Vulkan), Sichtprüfung auf Artefakte | vkmark |
 | Temperaturen, Takt, Leistung, Lüfter, Throttle-Gründe (1 Hz) | nvidia-smi, nvidia-settings |
-| VRAM-Temperatur (optional, Secure Boot aus) | [gddr6](https://github.com/olealgoritme/gddr6) – per Icon nachzurüsten |
+| VRAM- und Hotspot-Temperatur, Hotspot-Abstand zum Kern (Secure Boot aus) | [gputemps](https://github.com/ThomasBaruzier/gddr6-core-junction-vram-temps) |
 | Xid-Fehler, PCIe-Fehler (AER) | Kernel-Log |
 
 Grenzwerte pro Generation sind in [`gpu-check.sh`](gpu-check.sh) (Funktion `set_limits`) kommentiert.

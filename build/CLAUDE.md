@@ -12,7 +12,7 @@ Benutzer `gpu` (Passwort `gpu`), `sudo` ohne Passwort.
   zusätzlich in `ESP:/boot/grub/grub.cfg` (signierter GRUB 2.14 sucht dort ohne `$cmdpath`).
   Es werden **keine** NVRAM-Einträge angelegt (`--no-nvram`), `fbx64.efi` entfernt.
 - Kernel-Parameter: `quiet iomem=relaxed nvidia-drm.modeset=1`
-  (`iomem=relaxed` für gddr6/VRAM-Temperatur, wirkt nur mit Secure Boot AUS – Lockdown sperrt /dev/mem).
+  (`iomem=relaxed` für gputemps/VRAM-/Hotspot-Temperatur, wirkt nur mit Secure Boot AUS – Lockdown sperrt /dev/mem).
 - Partitionen: sda1 ESP „GPUCHK-EFI“ → /boot/efi · sda2 exFAT „GPUREPORTS“ → /mnt/reports ·
   sda3 ext4 „gpucheck-root“ → /  (Gerätename kann anders sein, Labels nutzen). Root wächst beim
   ersten Start einmalig auf Stick-Größe (`gpucheck-grow-root.service`, Flag `/etc/gpucheck-grow-root`).
@@ -25,9 +25,10 @@ Benutzer `gpu` (Passwort `gpu`), `sudo` ohne Passwort.
 - `/opt/gpucheck/bin/memtest_vulkan` v0.5.0 (Argument `1` = nicht-interaktiv, Ende per SIGTERM,
   Exit = 0x40 | Status-Bits)
 - `/opt/gpucheck/gpu-burn/` (gpu_burn + compare.fatbin, CUDA-13-Libs in `lib/`, Wrapper `/usr/local/bin/gpu_burn`)
-- `/opt/gpucheck/bin/gddr6` (VRAM-Temperatur, braucht root, iomem=relaxed, Secure Boot aus).
-  **Nicht im Image** (Projekt ohne Lizenz): `/opt/gpucheck/gddr6-nachruesten.sh` bzw. Desktop-Icon
-  lädt Commit 586c77a vom Original-Repo und baut es (braucht Internet).
+- `/opt/gpucheck/bin/gputemps` (Apache-2.0, Commit 6d8c5ec): `gputemps --json --device N` liefert je Sekunde
+  core/junction(Hotspot)/vram; braucht root, iomem=relaxed, Secure Boot aus. Ersetzt gddr6 (ohne Lizenz).
+- Desktop: `/opt/gpucheck/desktop-layout.py` (Autostart) setzt Schnell-/Volltest oben links, Rest rechts;
+  xfdesktop-Gravity 2 (oben rechts), Positionsdatei wird per `/etc/tmpfiles.d/gpucheck-desktop.conf` bei jedem Boot gelöscht.
 - vkmark (`--winsys xcb`), glmark2, nvtop, nvidia-settings, stress-ng, chromium, opencode
 - `claude` = `/usr/local/bin/claude`: Wrapper, installiert Claude Code beim ersten Aufruf nach `~/.local/bin`
 - Build-Skripte des Sticks: `/opt/gpucheck/build/` (stage1–4b, Mock-Testumgebung in `mock/`)
@@ -42,6 +43,8 @@ Benutzer `gpu` (Passwort `gpu`), `sudo` ohne Passwort.
   - Durchschnittswerte nur aus Messpunkten mit ≥ 50 % Auslastung (`load_active.csv`)
   - Report per `cp` statt `mv` auf exFAT (keine Eigentümer-Warnung)
 - v1.3: Hinweis im Report, wenn gddr6 fehlt (öffentliches Image ohne gddr6, Nachrüsten per Icon).
+- v1.4: gputemps statt gddr6, neue Prüfpunkte Hotspot-Temperatur/-Abstand (Grenzen vorläufig 95/105 °C bzw.
+  Ø 20/30 °C über Kern), Abbruch per Strg+C eigener WARN-Punkt, lastabhängige Punkte SKIP bei zu wenig Daten.
 - Real verifiziert: Erkennung, Felder, memtest_vulkan, gpu-burn, vkmark, gddr6 (Secure Boot aus), Lüfter-RPM.
   Offen: Grenzwert-Kalibrierung mit mehr Karten (bisher nur eine 3090), Ada/Blackwell ungetestet.
 

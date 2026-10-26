@@ -36,7 +36,7 @@ Downloads nach `/mnt/t/root/build/dl/` (Prüfsummen selbst kontrollieren):
 |---|---|
 | `memtest/memtest_vulkan-v0.5.0_DesktopLinux_X86_64.tar.xz` | GitHub-Release GpuZelenograd/memtest_vulkan v0.5.0 |
 | `gpuburn/src-0d19c94….tar.gz` | wilicc/gpu-burn, Commit 0d19c94 |
-| `gddr6/src-586c77a….tar.gz` | olealgoritme/gddr6, Commit 586c77a (wird für das öffentliche Image wieder entfernt) |
+| `gddr6/src-586c77a….tar.gz` | olealgoritme/gddr6, Commit 586c77a (nur privat; das öffentliche Image ersetzt es durch gputemps) |
 | `cuda/cuda-keyring_1.1-1_all.deb` | developer.download.nvidia.com, Repo `ubuntu2604` |
 
 ## 1.–4. Stufen im chroot
@@ -58,7 +58,7 @@ STICK_SERIAL=<Seriennummer> GPUCHECK_SCAN='eigene@mail|eigener-name' ./make-imag
 ```
 
 Liest den Stick **nur**, bereinigt eine Kopie (Logins, Verläufe, Logs, WLAN, Browserprofil,
-Spuren des Test-PCs), entfernt gddr6 und Claude Code, verkleinert auf 7 GiB (wächst beim
+Spuren des Test-PCs), ersetzt gddr6 durch gputemps (`image-stage.sh`), entfernt Claude Code, verkleinert auf 7 GiB (wächst beim
 ersten Start), leert freie Blöcke und das ext4-Journal, sucht roh nach persönlichen Daten und
 erzeugt `gpucheck.img.xz` + `.sha256`.
 
@@ -74,7 +74,7 @@ GPUCHECK_SCAN='eigene@mail' ./update-image.sh /pfad/gpucheck.img.xz
 
 ```sh
 PATH=$PWD/bin:$PWD/gpuburn:$PATH MEMTEST_BIN=$PWD/bin/mock-memtest GPUBURN_DIR=$PWD/gpuburn \
-GDDR6_BIN=$PWD/bin/gddr6 REPORT_ROOT=/tmp/reports NV_ICD=/dev/null \
+GPUTEMPS_BIN=$PWD/bin/gputemps REPORT_ROOT=/tmp/reports NV_ICD=/dev/null \
 PCI_SYSFS=$(./mk-sys.sh /tmp/gpucheck-mock-sys) \
 MOCK_SCENARIO=bad ../../gpu-check.sh --quick --idle 3 --memtest 6 --burn 15 --no-gl --no-ask
 ```
@@ -82,6 +82,6 @@ MOCK_SCENARIO=bad ../../gpu-check.sh --quick --idle 3 --memtest 6 --burn 15 --no
 `MOCK_SCENARIO=good|bad`, `MOCK_OLDFIELDS=1` simuliert ältere Treiber-Feldnamen. `mk-sys.sh` erzeugt
 das simulierte PCI-sysfs (nicht im Repository, weil Dateinamen mit `:` unter Windows nicht gehen).
 Erwartet: `good` → GESAMT PASS, `bad` → GESAMT FAIL mit VRAM-, Rechen-, Temperatur-, Throttle-,
-Leistungs-, Takt- und Xid-Fehlern.
+Leistungs-, Takt-, Hotspot- und Xid-Fehlern.
 
 `vmtest.sh`/`vmtype.py`: Stick schreibgeschützt in QEMU/OVMF booten (mit/ohne Secure Boot).

@@ -56,7 +56,7 @@ rm -rf "$M"/var/log/journal/* "$M"/var/lib/smartmontools/* "$M"/var/lib/chrony/*
 : > "$M/etc/machine-id"                      # leer -> neue ID beim ersten Start
 # aktuelle Skripte und Doku aus dem Repository
 install -m755 "$W/../gpu-check.sh" "$M/opt/gpucheck/gpu-check.sh"
-install -m755 "$W/gddr6-nachruesten.sh" "$M/opt/gpucheck/gddr6-nachruesten.sh"
+install -m755 "$W/desktop-layout.py" "$M/opt/gpucheck/desktop-layout.py"
 install -m644 "$W/../ANLEITUNG.md" "$M/opt/gpucheck/README.md"
 install -m644 "$W/CLAUDE.md" "$H/CLAUDE.md"; install -m644 "$W/CLAUDE.md" "$M/opt/gpucheck/build/CLAUDE.md"
 install -m644 "$W/../ANLEITUNG.md" "$M/opt/gpucheck/build/README.md"
@@ -116,7 +116,7 @@ if LC_ALL=C command grep -a -q -E "$PAT" "$IMG"; then
     exit 1
 fi
 echo "Rohsuche: keine Treffer"
-xz -T0 -6 -f "$IMG"                          # ersetzt gpucheck.img durch gpucheck.img.xz
+xz -T2 -6 -f "$IMG"                          # ersetzt gpucheck.img durch gpucheck.img.xz
 xz -t "$IMG.xz"
 ( cd "$W" && sha256sum "$(basename "$IMG").xz" > "$(basename "$IMG").xz.sha256" && cat "$(basename "$IMG").xz.sha256" )
 [ -n "${SUDO_UID:-}" ] && chown "$SUDO_UID:$SUDO_GID" "$IMG.xz" "$IMG.xz.sha256"

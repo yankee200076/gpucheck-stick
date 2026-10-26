@@ -1,0 +1,11 @@
+#!/bin/bash
+# Mock: gputemps --json (RTX 3090). good: Hotspot ~12 °C über Kern, bad: ~33 °C und VRAM 108 °C
+B=$([ "${MOCK_SCENARIO:-good}" = bad ] && echo 1 || echo 0)
+while :; do
+  if pgrep -x mock-memtest >/dev/null; then c=63; v=$([ $B = 1 ] && echo 108 || echo 92)
+  elif pgrep -x gpu_burn >/dev/null; then c=$([ $B = 1 ] && echo 87 || echo 73); v=84
+  else c=39; v=52; fi
+  j=$((c + (B == 1 ? 33 : 12)))
+  printf '{"timestamp":%s,"gpus":[{"index":0,"core":%d,"junction":%d,"vram":%d}]}\n' "$(date +%s%3N)" $c $j $v
+  sleep 1
+done

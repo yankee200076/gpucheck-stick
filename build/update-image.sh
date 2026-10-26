@@ -20,7 +20,7 @@ H=$M/home/gpu
 
 # --- Dateien aus dem Repository
 install -m755 "$W/../gpu-check.sh"         "$M/opt/gpucheck/gpu-check.sh"
-install -m755 "$W/gddr6-nachruesten.sh"    "$M/opt/gpucheck/gddr6-nachruesten.sh"
+install -m755 "$W/desktop-layout.py"       "$M/opt/gpucheck/desktop-layout.py"
 install -m644 "$W/../ANLEITUNG.md"         "$M/opt/gpucheck/README.md"
 install -m644 "$W/CLAUDE.md"               "$H/CLAUDE.md"
 rm -rf "$M/opt/gpucheck/build"; mkdir -p "$M/opt/gpucheck/build"
@@ -42,7 +42,7 @@ find "$M/var/log" -type f -exec truncate -s 0 {} +
 
 # --- Reports-Partition: Anleitung, Skript, Build-Skripte
 # komplett leeren (blkdiscard = Nullen, auch gelöschte Reste) und neu formatieren, gleiche UUID wie in fstab
-blkdiscard "${LOOP}p2"
+blkdiscard -f "${LOOP}p2"
 mkfs.exfat -L GPUREPORTS "${LOOP}p2" >/dev/null; tune.exfat -I 0xFEDBF6CD "${LOOP}p2" >/dev/null
 mkdir -p "$M.rep"; mount "${LOOP}p2" "$M.rep"; mkdir -p "$M.rep/build-skripte"
 cp "$M/opt/gpucheck/README.md" "$M/opt/gpucheck/gpu-check.sh" "$M.rep/"
@@ -63,7 +63,7 @@ if LC_ALL=C command grep -a -q -E "$PAT" "$IMG"; then
     echo "ABBRUCH: persönliche Daten im Image gefunden:"; LC_ALL=C command grep -a -o -E "$PAT" "$IMG" | sort | uniq -c; exit 1
 fi
 echo "Rohsuche: keine Treffer"
-xz -T0 -6 -f "$IMG"; xz -t "$XZ"
+xz -T2 -6 -f "$IMG"; xz -t "$XZ"   # -T2: wenig RAM (je Thread ~100 MB)
 ( cd "$(dirname "$XZ")" && sha256sum "$(basename "$XZ")" > "$(basename "$XZ").sha256" && cat "$(basename "$XZ").sha256" )
 [ -n "${SUDO_UID:-}" ] && chown "$SUDO_UID:$SUDO_GID" "$XZ" "$XZ.sha256"
 echo "FERTIG: $XZ"

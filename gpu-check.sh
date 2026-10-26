@@ -13,7 +13,7 @@
 # Ergebnis: Ordner mit Zeitstempel auf der Partition GPUREPORTS des Sticks.
 # =============================================================================
 set -u
-VERSION="1.3"
+VERSION="1.4"
 # Zahlen immer mit Punkt (CSV, printf, awk) – Texte bleiben deutsch/UTF-8
 [ -n "${LC_ALL:-}" ] && export LANG="$LC_ALL"
 unset LC_ALL
@@ -23,7 +23,7 @@ export LC_NUMERIC=C
 GPUCHECK_HOME=${GPUCHECK_HOME:-/opt/gpucheck}
 MEMTEST_BIN=${MEMTEST_BIN:-$GPUCHECK_HOME/bin/memtest_vulkan}
 GPUBURN_DIR=${GPUBURN_DIR:-$GPUCHECK_HOME/gpu-burn}
-GDDR6_BIN=${GDDR6_BIN:-$GPUCHECK_HOME/bin/gddr6}
+GPUTEMPS_BIN=${GPUTEMPS_BIN:-$GPUCHECK_HOME/bin/gputemps}   # VRAM- + Hotspot-Temperatur (Apache-2.0)
 REPORT_ROOT=${REPORT_ROOT:-/mnt/reports}
 NV_ICD=${NV_ICD:-/usr/share/vulkan/icd.d/nvidia_icd.json}
 DESKTOP_USER=${DESKTOP_USER:-gpu}
@@ -160,7 +160,14 @@ set_limits() {
     LIM_CORE_WARN=81; LIM_CORE_FAIL=87
     # Leerlauf: > 55 °C bei 0-RPM-Lüftern möglich, > 65 °C auffällig.
     LIM_IDLE_WARN=65
-    # VRAM-Temperatur (nur mit gddr6-Tool, Secure Boot aus):
+    # Hotspot (Junction, nur mit gputemps, Secure Boot aus). NVIDIA drosselt bei
+    # ~105–110 °C Hotspot. Entscheidend ist der Abstand Hotspot – Kern unter Last:
+    # gesund 8–15 °C, ab ~20 °C sitzt der Kühler schlecht oder die Paste ist
+    # ausgetrocknet/ausgepumpt, ab ~30 °C sicherer Befund (Paste erneuern).
+    # Werte vorläufig, mit echten Karten kalibrieren.
+    LIM_HOT_WARN=95; LIM_HOT_FAIL=105
+    LIM_HOTDELTA_WARN=20; LIM_HOTDELTA_FAIL=30
+    # VRAM-Temperatur (nur mit gputemps, Secure Boot aus):
     #  - Ampere GDDR6X (3080/3090): Throttle bei 110 °C. 3090 hat Speicher auch auf
     #    der Rückseite und wird bekanntlich heiß. Unter memtest_vulkan sind ~84–94 °C
     #    normal, >= 100 °C deutet auf verschlissene Wärmeleitpads, >= 106 °C FAIL.
@@ -271,13 +278,17 @@ probe_fields() {
 }
 # Abfrageergebnis (nur gültige Felder) auf volle Spaltenzahl auffächern
 expand_line() { awk -F, -v map="$SMI_MAP" 'BEGIN{n=split(map,m," ")} {j=1; o=""; for(i=1;i<=n;i++){ v=""; if(m[i]==1){v=$j; j++}; o=o (i>1?",":"") v }; print o}'; }
-CSV_HEADER="t,phase,gpu_temp,mem_temp_nvml,sm_clk,mem_clk,power_w,power_limit_w,fan_pct,util_pct,pcie_gen,pcie_width,throttle,pstate,mem_used_mib,tlimit,vram_temp,fan_rpm"
+CSV_HEADER="t,phase,gpu_temp,mem_temp_nvml,sm_clk,mem_clk,power_w,power_limit_w,fan_pct,util_pct,pcie_gen,pcie_width,throttle,pstate,mem_used_mib,tlimit,vram_temp,fan_rpm,hotspot"
 
-GDDR6_RAW=""
-vram_temp_now() {
-    [ -n "$GDDR6_RAW" ] && [ -s "$GDDR6_RAW" ] || { echo ""; return; }
-    tail -c 300 "$GDDR6_RAW" | tr '\r' '\n' | grep -o '[0-9]\+°C' | tail -1 | tr -dc '0-9'
+# gputemps --json schreibt je Sekunde eine Zeile {"timestamp":…,"gpus":[{"index":0,"core":55,"junction":68,"vram":72}]}
+# (fehlender Sensor = null). Gelesen wird die letzte vollständige Zeile.
+GPUTEMPS_RAW=""
+gputemp_now() {   # gputemp_now vram|junction
+    [ -n "$GPUTEMPS_RAW" ] && [ -s "$GPUTEMPS_RAW" ] || { echo ""; return; }
+    tail -n 3 "$GPUTEMPS_RAW" | grep '}]}$' | tail -1 | grep -o "\"$1\":[0-9]*" | cut -d: -f2
 }
+vram_temp_now() { gputemp_now vram; }
+hotspot_now()   { gputemp_now junction; }
 
 FAN_RPM_OK=0
 fan_rpm_now() {   # "1520;1490;1510" – je Lüfter, über nvidia-settings (braucht X auf der NVIDIA-Karte)
@@ -295,7 +306,8 @@ sampler() {   # sampler PHASE CSV
         line=$(smi --query-gpu="$SMI_FIELDS" --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' | expand_line)
         # Lüfter-RPM nur alle 3 s (nvidia-settings ist langsam)
         if [ $((n % 3)) -eq 0 ]; then rpm=$(fan_rpm_now); fi
-        printf '%.1f,%s,%s,%s,%s\n' "$(echo "$(date +%s.%N) - $t0" | bc)" "$ph" "$line" "$(vram_temp_now)" "$rpm" >> "$out"
+        printf '%.1f,%s,%s,%s,%s,%s\n' "$(echo "$(date +%s.%N) - $t0" | bc)" "$ph" "$line" \
+            "$(vram_temp_now)" "$rpm" "$(hotspot_now)" >> "$out"
         n=$((n+1))
         sleep 1
     done
@@ -498,24 +510,27 @@ if [ $FATAL = 0 ]; then
     # Secure Boot / VRAM-Temperatur-Tool
     SB=$(mokutil --sb-state 2>/dev/null | head -1)
     say "  Secure Boot    : ${SB:-unbekannt};  Kernel-Lockdown: $(cat /sys/kernel/security/lockdown 2>/dev/null || echo n/a)"
-    VRAM_NOTE=""
-    if [ -x "$GDDR6_BIN" ]; then
-        GDDR6_RAW="$TMPDIR_RUN.gddr6.raw"   # Rohstrom nur in /tmp (tmpfs), nicht im Report
-        stdbuf -o0 "$GDDR6_BIN" > "$GDDR6_RAW" 2>&1 &
-        G6PID=$!; BG_PIDS+=($G6PID); sleep 2
-        if [ -z "$(vram_temp_now)" ]; then
-            kill $G6PID 2>/dev/null
-            if grep -qi 'enabled' <<<"$SB"; then VRAM_NOTE="nicht auslesbar: Secure Boot aktiv (blockiert /dev/mem). Für VRAM-Temp Secure Boot im BIOS abschalten."
-            elif grep -q 'No compatible GPU' "$GDDR6_RAW"; then VRAM_NOTE="nicht auslesbar: Karte wird vom gddr6-Tool nicht unterstützt"
-            else VRAM_NOTE="nicht auslesbar ($(head -c 120 "$GDDR6_RAW" | tr '\n\r' '  '))"; fi
-            GDDR6_RAW=""
-        else
-            say "  VRAM-Temp      : $(vram_temp_now) °C (gddr6-Tool aktiv)"
+    VRAM_NOTE=""; HOT_NOTE=""
+    if [ -x "$GPUTEMPS_BIN" ]; then
+        GPUTEMPS_RAW="$TMPDIR_RUN.gputemps.json"   # Rohstrom nur in /tmp (tmpfs), Fehler landen im Report
+        "$GPUTEMPS_BIN" --json --device "$GPU" --refresh-ms 1000 > "$GPUTEMPS_RAW" 2> "$DIR/gputemps.err" &
+        GTPID=$!; BG_PIDS+=($GTPID); sleep 3
+        if grep -qi 'dev/mem' "$DIR/gputemps.err" && grep -qi 'enabled' <<<"$SB"; then
+            VRAM_NOTE="nicht auslesbar: Secure Boot aktiv (sperrt /dev/mem). Für VRAM-/Hotspot-Temperatur Secure Boot im BIOS abschalten."
+        elif ! kill -0 "$GTPID" 2>/dev/null; then
+            VRAM_NOTE="nicht auslesbar (gputemps: $(head -c 150 "$DIR/gputemps.err" | tr '\n' ' '))"
+        fi
+        [ -n "$VRAM_NOTE" ] && { HOT_NOTE=$VRAM_NOTE; GPUTEMPS_RAW=""; }
+        if [ -n "$GPUTEMPS_RAW" ]; then
+            [ -n "$(vram_temp_now)" ] || VRAM_NOTE="nicht auslesbar: VRAM-Sensor dieser Karte wird von gputemps nicht unterstützt"
+            [ -n "$(hotspot_now)" ]   || HOT_NOTE="nicht auslesbar: Hotspot-Sensor dieser Karte wird von gputemps nicht unterstützt"
+            say "  VRAM-Temp      : $(vram_temp_now || true) °C${VRAM_NOTE:+ – $VRAM_NOTE}"
+            say "  Hotspot        : $(hotspot_now || true) °C${HOT_NOTE:+ – $HOT_NOTE}"
         fi
     else
-        # gddr6 hat keine Lizenz -> nicht im öffentlichen Image, per Icon nachrüstbar
-        VRAM_NOTE="nicht auslesbar: gddr6-Tool nicht installiert (Desktop-Icon „VRAM-Temperatur nachrüsten“, braucht einmal Internet)"
+        VRAM_NOTE="nicht auslesbar: gputemps fehlt ($GPUTEMPS_BIN)"; HOT_NOTE=$VRAM_NOTE
     fi
+    [ -s "$DIR/gputemps.err" ] || rm -f "$DIR/gputemps.err"
     # Lüfter-RPM über nvidia-settings möglich?
     if [ -n "${DISPLAY:-}" ] && command -v nvidia-settings >/dev/null; then
         FAN_RPM_OK=1; [ -n "$(fan_rpm_now)" ] || FAN_RPM_OK=0
@@ -557,7 +572,7 @@ if [ $FATAL = 0 ]; then
         if [ ! -x "$MEMTEST_BIN" ]; then
             result "VRAM-Test" SKIP "memtest_vulkan nicht gefunden"
         else
-            start_sampler memtest "$DIR/memtest.csv"
+            start_sampler memtest "$DIR/memtest.csv"; MT_T0=$SECONDS
             # Nur den NVIDIA-Vulkan-Treiber laden (sonst wählt memtest evtl. iGPU/llvmpipe).
             # Argument "1" = erstes Gerät, nicht-interaktiver Modus. SIGTERM beendet sauber
             # (SIGINT wird an Hintergrundjobs nicht-interaktiver Shells ignoriert vererbt).
@@ -571,7 +586,7 @@ if [ $FATAL = 0 ]; then
                 printf '\r  %s  %s' "$(tail -1 "$DIR/memtest.csv" | awk -F, '{printf "%3.0fs GPU %s°C VRAM %s°C %sW", $1,$3,($17==""?"-":$17),$7}')" "$(echo "$L" | sed -E 's/ +/ /g' | cut -c1-60)"
                 sleep 2
             done; echo
-            wait $MPID; MRC=$?
+            wait $MPID; MRC=$?; MT_DUR=$((SECONDS - MT_T0))
             stop_sampler
             cat "$DIR/memtest_vulkan.out" >> "$DIR/memtest_vulkan.full.txt"
             ITER=$(grep -a 'iteration' "$DIR/memtest_vulkan.out" | tail -1 | awk '{print $1}')
@@ -581,6 +596,9 @@ if [ $FATAL = 0 ]; then
             if [ "$NERR" -gt 0 ] || { [ $((MRC & 0xE0)) -eq 64 ] && [ $((MRC & 0x02)) -ne 0 ]; }; then
                 result "VRAM-Test" FAIL "Speicherfehler gefunden ($NERR Meldungen) – VRAM/Speichercontroller defekt"
                 grep -a -A6 'Error found' "$DIR/memtest_vulkan.out" | head -40 >> "$LOG"
+            elif [ $ABORTED = 1 ]; then
+                # Strg+C trifft auch memtest_vulkan -> Exit-Bits "Abbruch" sind dann kein Hardwarebefund
+                result "VRAM-Test" SKIP "abgebrochen nach ${MT_DUR} s (${ITER:-0} Iterationen ohne Fehler)"
             elif [ $((MRC & 0xE0)) -ne 64 ] || [ $((MRC & 0x01)) -eq 0 ]; then
                 result "VRAM-Test" FAIL "memtest_vulkan konnte nicht laufen/abgestürzt (Exit $MRC) – siehe memtest_vulkan.out"
             elif [ $((MRC & 0x04)) -ne 0 ]; then
@@ -588,7 +606,7 @@ if [ $FATAL = 0 ]; then
             elif [ "${ITER:-0}" -lt 5 ]; then
                 result "VRAM-Test" WARN "nur ${ITER:-0} Iterationen – Test zu kurz/zu langsam"
             else
-                result "VRAM-Test" PASS "keine Fehler, $ITER Iterationen, ${BW:-?} in ${T_MEMTEST} s"
+                result "VRAM-Test" PASS "keine Fehler, $ITER Iterationen, ${BW:-?} in ${MT_DUR} s"
             fi
         fi
     fi
@@ -695,6 +713,11 @@ if [ $FATAL = 0 ]; then
         L_GEN=$(stat "$LOAD" pcie_gen mode "$WARM"); L_W=$(stat "$LOAD" pcie_width mode "$WARM")
         U_AVG=$(stat "$LOAD" util_pct avg "$WARM")
         say "  Last-Referenz: ${LOADN%.csv}  (Auslastung Ø ${U_AVG} %)"
+        # Zu wenige Messpunkte unter Last (Test abgebrochen/sehr kurz): lastabhängige
+        # Prüfungen als SKIP statt PASS ohne Werte
+        N_LOAD=$(awk -F, -v s="$WARM" 'NR>1 && $1>=s' "$LOAD" | wc -l)
+        LOAD_OK=1; [ "$N_LOAD" -ge 5 ] || { LOAD_OK=0; say "  Nur $N_LOAD Messpunkte unter Last – Throttle/Lüfter/PCIe nicht bewertbar"; }
+        NO_LOAD_MSG="zu wenige Messpunkte unter Last (Test abgebrochen oder zu kurz)"
         say "  GPU-Temp max ${T_MAX} °C / Ø ${T_AVG} °C | SM-Takt Ø ${C_AVG} MHz (min ${C_MIN}) | Leistung Ø ${P_AVG} W (max ${P_MAX}, Limit ${PL}) | Lüfter Ø ${F_AVG} %"
 
         # --- Kerntemperatur (Maximum über alle Lastphasen)
@@ -712,8 +735,26 @@ if [ $FATAL = 0 ]; then
                                                  || result "Temp.-Reserve (T.Limit)" PASS "min. ${TL_MIN} °C bis Slowdown"
             fi
         fi
-        # --- Hotspot: wird von NVML für GeForce nicht bereitgestellt
-        result "Hotspot-Temperatur" INFO "unter Linux nicht auslesbar (NVIDIA stellt Hotspot für GeForce nicht über NVML bereit)"
+        # --- Hotspot (gputemps): Absolutwert und Abstand zum Kern unter Last
+        H_MAX=$(stat "$CSV" hotspot max)
+        if isnum "$H_MAX"; then
+            # Abstand Hotspot – Kern je Messpunkt unter Last (nach Aufheizen), Ø und Maximum
+            read -r D_AVG D_MAX < <(awk -F, -v skip="$WARM" '
+                NR==1 { for (i=1;i<=NF;i++) { if ($i=="hotspot") h=i; if ($i=="gpu_temp") g=i }; next }
+                $1 < skip || $h=="" || $g=="" { next }
+                { d=$h-$g; n++; s+=d; if (n==1||d>m) m=d }
+                END { if (n) printf "%.1f %g\n", s/n, m; else print "" }' "$LOAD")
+            if fge "$H_MAX" "$LIM_HOT_FAIL"; then result "Hotspot-Temperatur" FAIL "max ${H_MAX} °C (>= ${LIM_HOT_FAIL} °C)"
+            elif fge "$H_MAX" "$LIM_HOT_WARN"; then result "Hotspot-Temperatur" WARN "max ${H_MAX} °C (>= ${LIM_HOT_WARN} °C)"
+            else result "Hotspot-Temperatur" PASS "max ${H_MAX} °C"; fi
+            if isnum "${D_AVG:-}"; then
+                if fge "$D_AVG" "$LIM_HOTDELTA_FAIL"; then result "Hotspot-Abstand" FAIL "Ø ${D_AVG} °C über Kern (max ${D_MAX}) – Paste/Kühlermontage"
+                elif fge "$D_AVG" "$LIM_HOTDELTA_WARN"; then result "Hotspot-Abstand" WARN "Ø ${D_AVG} °C über Kern (max ${D_MAX}) – Paste prüfen"
+                else result "Hotspot-Abstand" PASS "Ø ${D_AVG} °C über Kern unter Last (max ${D_MAX})"; fi
+            fi
+        else
+            result "Hotspot-Temperatur" SKIP "${HOT_NOTE:-nicht auslesbar}"
+        fi
         # --- VRAM-Temperatur
         V_MAX=$(stat "$CSV" vram_temp max); V_NVML=$(stat "$CSV" mem_temp_nvml max)
         isnum "$V_MAX" || V_MAX=$V_NVML
@@ -726,6 +767,7 @@ if [ $FATAL = 0 ]; then
         fi
 
         # --- Throttle-Gründe (NVML clocks_event_reasons Bits)
+        if [ $LOAD_OK = 1 ]; then
         S_PWR=$(throttle_pct "$LOAD" 4 "$WARM")       # 0x04 SW Power Cap
         S_HWS=$(throttle_pct "$LOAD" 8 "$WARM")       # 0x08 HW Slowdown
         S_SWT=$(throttle_pct "$LOAD" 32 "$WARM")      # 0x20 SW Thermal Slowdown
@@ -743,6 +785,7 @@ if [ $FATAL = 0 ]; then
         done
         [ -n "$HW_LIST" ] && TH_MSG="$HW_LIST – Stromversorgung/12V-Stecker/VRM oder Überhitzung"
         result "Throttle-Gründe" "$TH_STATE" "$TH_MSG"
+        else result "Throttle-Gründe" SKIP "$NO_LOAD_MSG"; fi
 
         # --- Leistung (nur wenn CUDA-Last gelaufen ist; memtest zieht kein Power-Limit)
         if [ "$LOADN" = burn.csv ] && isnum "$P_AVG" && isnum "$PL"; then
@@ -759,6 +802,7 @@ if [ $FATAL = 0 ]; then
             else result "Takt unter Last" PASS "Ø ${C_AVG} MHz (Basis ${BASE_CLK}, max ${MAX_CLK})"; fi
         fi
         # --- Lüfter
+        if [ $LOAD_OK = 0 ]; then result "Lüfter" SKIP "$NO_LOAD_MSG"; else
         RPM_MIN=$(fan_rpm_min "$LOAD" "$WARM"); NF=$(num_fans "$LOAD"); FAN_DEAD=$(fan_dead_pct "$LOAD" "$WARM")
         if [ "$FAN_DEAD" -ge 50 ]; then
             result "Lüfter" FAIL "ein Lüfter steht (0 RPM), während die anderen drehen – Lüfter defekt/Kabel lose"
@@ -769,9 +813,12 @@ if [ $FATAL = 0 ]; then
         else
             result "Lüfter" PASS "Ø ${F_AVG} % unter Last$(isnum "$RPM_MIN" && echo ", $NF Lüfter, min ${RPM_MIN} RPM")"
         fi
+        fi
         # --- PCIe unter Last
         say "  PCIe unter Last: nvidia-smi Gen${L_GEN} x${L_W}; sysfs-Stichprobe: ${SYS_LOAD_LINK:-n/a}"
-        if [ -n "$L_GEN" ] && [ "$L_GEN" -lt "$WANT_GEN" ] 2>/dev/null; then
+        if [ $LOAD_OK = 0 ] || [ -z "$L_GEN$L_W" ]; then
+            result "PCIe-Link Last" SKIP "$NO_LOAD_MSG"
+        elif [ -n "$L_GEN" ] && [ "$L_GEN" -lt "$WANT_GEN" ] 2>/dev/null; then
             result "PCIe-Link Last" WARN "Gen${L_GEN} x${L_W}, möglich wäre Gen${WANT_GEN} x${WANT_W} (Riser/Steckplatz/BIOS-Einstellung?)"
         elif [ -n "$L_W" ] && [ "$L_W" -lt "$WANT_W" ] 2>/dev/null; then
             result "PCIe-Link Last" WARN "Breite x${L_W} statt x${WANT_W} – Kontakte verschmutzt/beschädigt oder Steckplatz"
@@ -800,12 +847,13 @@ elif [ "$AER_COR" -gt 10 ]; then result "PCIe-Fehler (AER)" WARN "$AER_COR korri
 else result "PCIe-Fehler (AER)" PASS "keine relevanten PCIe-Fehler ($AER_COR korrigiert)"; fi
 
 # ===================================================================== Zusammenfassung
+# Abbruch sichtbar machen (sonst stünde GESAMT: WARN ohne erkennbaren Grund da)
+[ $ABORTED = 1 ] && result "Testlauf" WARN "abgebrochen (Strg+C) – nicht alle Tests durchgeführt, Ergebnis unvollständig"
 OVERALL=PASS
 for s in "${R_STATE[@]}"; do
     [ "$s" = FAIL ] && OVERALL=FAIL
     [ "$s" = WARN ] && [ $OVERALL = PASS ] && OVERALL=WARN
 done
-[ $ABORTED = 1 ] && [ $OVERALL = PASS ] && OVERALL=WARN
 END_ISO=$(date '+%Y-%m-%d %H:%M:%S'); DUR=$(( $(date +%s) - START_EPOCH ))
 
 {

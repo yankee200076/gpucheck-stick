@@ -4,3 +4,4 @@
 *.sha256
 *.log
 mnt/
+__pycache__/
