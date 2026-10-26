@@ -1,0 +1,6 @@
+# Images und Arbeitsdateien gehören nicht ins Repository
+*.img
+*.img.xz
+*.sha256
+*.log
+mnt/

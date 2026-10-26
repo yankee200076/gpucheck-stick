@@ -1,0 +1,3 @@
+#!/bin/bash
+trap 'exit 143' TERM
+echo "=== vkmark mock ==="; while :; do echo "[vertex] device-local=true: FPS: 4200 FrameTime: 0.238 ms"; sleep 1; done

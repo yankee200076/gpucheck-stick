@@ -1,0 +1,5 @@
+#!/bin/bash
+if [ "${MOCK_SCENARIO:-good}" = bad ]; then a=0; else a=1650; fi
+echo "  Attribute 'GPUCurrentFanSpeedRPM' (gpucheck:0[fan:0]): 1640."
+echo "  Attribute 'GPUCurrentFanSpeedRPM' (gpucheck:0[fan:1]): $a."
+echo "  Attribute 'GPUCurrentFanSpeedRPM' (gpucheck:0[fan:2]): 1660."

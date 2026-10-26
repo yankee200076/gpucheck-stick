@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "Device: RTX 3090 GDDR6X (GA102 / 0x2204) pci=1:0:0"
+while :; do if pgrep -x mock-memtest >/dev/null; then t=$([ "${MOCK_SCENARIO:-good}" = bad ] && echo 108 || echo 92); elif pgrep -x gpu_burn >/dev/null; then t=84; else t=52; fi
+ printf '\rVRAM Temps: | %3d°C |' $t; sleep 1; done

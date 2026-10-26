@@ -1,0 +1,6 @@
+#!/bin/bash
+# Mock memtest_vulkan: läuft bis SIGINT, Exit-Code wie Original (0x41 = ok, 0x43 = Fehler)
+st=65; trap 'exit $((st+16))' TERM INT
+i=0; while :; do i=$((i+19)); echo "  $i iteration. Since last report passed 1.0s  written 351.0GB, read: 409.5GB    751.7GB/sec"
+  if [ "${MOCK_SCENARIO:-good}" = bad ] && [ $i -gt 40 ]; then echo "Error found. Mode NEXT_RE_READ, total errors 0x3C out of 0x3C000000 (0.0000001%)"; st=67; fi
+  sleep 1; done

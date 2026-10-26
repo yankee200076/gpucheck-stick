@@ -1,0 +1,46 @@
+#!/bin/bash
+# Mock: simuliert eine RTX 3090 (Szenario good|bad über MOCK_SCENARIO)
+SC=${MOCK_SCENARIO:-good}
+load=0; { pgrep -x gpu_burn || pgrep -x mock-memtest; } >/dev/null && load=1
+pgrep -x gpu_burn >/dev/null && load=2
+args="$*"
+case "$args" in
+  *--help-query-gpu*) echo '"temperature.gpu"'; echo '"temperature.gpu.tlimit"'; exit 0;;
+  *"-i "*" -L"*) echo "Option -L kann nicht mit -i kombiniert werden (wie echter Treiber 595)"; exit 2;;
+  *" -L"*) echo "GPU 0: NVIDIA GeForce RTX 3090 (UUID: GPU-1234)"; exit 0;;
+  *" -pm "*) echo "Enabled persistence"; exit 0;;
+  *" -q"*) printf 'Product Name : NVIDIA GeForce RTX 3090\n    Product Architecture              : Ampere\n    GPU Part Number                   : 2204-300-A1\n'; exit 0;;
+esac
+f=$(echo "$args" | sed -n 's/.*--query-gpu=\([^ ]*\).*/\1/p')
+# MOCK_OLDFIELDS=1: alter Treiber ohne clocks_event_reasons/tlimit -> Fehler wie das Original
+if [ "${MOCK_OLDFIELDS:-0}" = 1 ] && [[ ,$f, =~ ,(clocks_event_reasons.active|temperature.gpu.tlimit|power.draw), ]]; then
+  echo "Field \"${BASH_REMATCH[1]}\" is not a valid field to query."; exit 2; fi
+if [ "${MOCK_OLDFIELDS:-0}" = 1 ]; then f=${f//clocks_throttle_reasons.active/clocks_event_reasons.active}; f=${f//power.draw.average/power.draw}; fi
+r=$((RANDOM%10))
+out=()
+IFS=, read -ra FL <<<"$f"
+for k in "${FL[@]}"; do
+  case $k in
+    index) v=0;; name) v="NVIDIA GeForce RTX 3090";; pci.bus_id) v="00000000:01:00.0";;
+    vbios_version) v="94.02.42.40.4B";; memory.total) v=24576;; serial) v="[N/A]";; uuid) v="GPU-1234";;
+    power.default_limit) v=390.00;; power.max_limit) v=480.00;; enforced.power.limit) v=390.00;;
+    clocks.default_applications.graphics) v=1395;; clocks.max.sm) v=2100;; display_active) v=Enabled;;
+    temperature.gpu) case $load in 0) v=$((38+r/3));; 1) v=$((62+r/3));; 2) [ $SC = bad ] && v=$((86+r/3)) || v=$((72+r/3));; esac;;
+    temperature.memory) v="N/A";;
+    temperature.gpu.tlimit) case $load in 2) [ $SC = bad ] && v=2 || v=12;; *) v=40;; esac;;
+    clocks.sm) case $load in 0) v=210;; 1) v=1905;; 2) [ $SC = bad ] && v=1100 || v=$((1750+r*5));; esac;;
+    clocks.mem) [ $load = 0 ] && v=405 || v=9751;;
+    power.draw) case $load in 0) v=28.5;; 1) v=250.3;; 2) [ $SC = bad ] && v=160.2 || v=$((380+r)).4;; esac;;
+    power.limit) v=390.00;;
+    fan.speed) case $load in 0) v=0;; 1) v=45;; 2) v=$([ $SC = bad ] && echo 20 || echo 68);; esac;;
+    utilization.gpu) [ $load = 0 ] && v=0 || v=100;;
+    pcie.link.gen.current) [ $load = 0 ] && v=1 || v=4;;
+    pcie.link.width.current) [ $SC = bad ] && v=8 || v=16;;
+    clocks_event_reasons.active) case $load in 0) v=0x0000000000000001;; 1) v=0x0000000000000000;; 2) [ $SC = bad ] && v=0x0000000000000088 || v=0x0000000000000004;; esac;;
+    pstate) [ $load = 0 ] && v=P8 || v=P2;;
+    memory.used) [ $load = 0 ] && v=300 || v=22000;;
+    *) v="[N/A]";;
+  esac
+  out+=("$v")
+done
+(IFS=,; echo "${out[*]}" | sed 's/,/, /g')

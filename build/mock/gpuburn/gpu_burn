@@ -1,0 +1,4 @@
+#!/bin/bash
+T=${@: -1}; for ((s=0;s<T;s+=5)); do printf '\r%d.0%%  proc'"'"'d: 1234 (15000 Gflop/s)   errors: 0   temps: 72 C ' $((100*s/T)); sleep 5; done
+echo; echo "Killing processes with SIGTERM (soft kill)"; echo "Tested 1 GPUs:"
+[ "${MOCK_SCENARIO:-good}" = bad ] && echo "	GPU 0: FAULTY" || echo "	GPU 0: OK"

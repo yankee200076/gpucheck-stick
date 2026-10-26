@@ -1,0 +1,6 @@
+#!/bin/bash
+case "$*" in
+  *"-d 10de:"*) echo "0000:01:00.0 0300: 10de:2204 (rev a1)"; echo "0000:01:00.1 0403: 10de:1aef (rev a1)";;
+  *"-vmm"*) printf 'Slot:\t01:00.0\nClass:\tVGA compatible controller\nVendor:\tNVIDIA Corporation\nDevice:\tGA102 [GeForce RTX 3090]\nSVendor:\tASUSTeK Computer Inc.\nSDevice:\tROG Strix RTX 3090\n';;
+  *) echo "01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GA102 [GeForce RTX 3090] [10de:2204] (mock)";;
+esac

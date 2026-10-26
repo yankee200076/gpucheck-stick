@@ -1,0 +1,6 @@
+#!/bin/bash
+echo "2026-10-23T12:00:00 gpucheck kernel: Linux version 7.0.0 (mock)"
+if [ "${MOCK_SCENARIO:-good}" = bad ]; then
+  echo "2026-10-23T12:00:05 gpucheck kernel: NVRM: Xid (PCI:0000:01:00): 13, pid=1234, name=gpu_burn, Graphics Exception"
+  echo "2026-10-23T12:00:06 gpucheck kernel: pcieport 0000:00:01.0: AER: Corrected error message received from 0000:01:00.0"
+fi
