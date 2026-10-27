@@ -1,5 +1,7 @@
 # GPU-Check-Stick
 
+**Einfache Anleitung, Download und Textvorlagen für Kleinanzeigen: <https://yankee200076.github.io/gpucheck-stick/>**
+
 Bootfähiger USB-Stick zum **Prüfen gebrauchter NVIDIA-Grafikkarten vor dem Kauf**:
 Ampere (RTX 30xx), Ada (RTX 40xx), Blackwell (RTX 50xx).
 
