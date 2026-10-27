@@ -46,6 +46,8 @@ Benutzer `gpu` (Passwort `gpu`), `sudo` ohne Passwort.
 - v1.4: gputemps statt gddr6, neue Prüfpunkte Hotspot-Temperatur/-Abstand (Grenzen vorläufig 95/105 °C bzw.
   Ø 20/30 °C über Kern), Abbruch per Strg+C eigener WARN-Punkt, lastabhängige Punkte SKIP bei zu wenig Daten.
 - Real verifiziert: Erkennung, Felder, memtest_vulkan, gpu-burn, vkmark, gddr6 (Secure Boot aus), Lüfter-RPM.
+- v1.4 real verifiziert (RTX 3090, 2026-10-27, Quick, GESAMT PASS): gputemps liefert VRAM (max 96 °C) und Hotspot
+  (max 93 °C, Ø 18,6 °C über Kern bei 345 W); Desktop-Layout auf 2560×1440 korrekt.
   Offen: Grenzwert-Kalibrierung mit mehr Karten (bisher nur eine 3090), Ada/Blackwell ungetestet.
 
 ## Hinweise zur Fehlersuche

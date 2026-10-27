@@ -26,8 +26,8 @@ Grenzwerte pro Generation sind in [`gpu-check.sh`](gpu-check.sh) (Funktion `set_
 
 ## Download und Stick erstellen
 
-**Image:** `gpucheck.img.xz` (ca. 2,7 GB) auf SourceForge: **<https://sourceforge.net/projects/gpucheck-stick/files/v1.3/>**
-(dort auch `gpucheck.img.xz.sha256`, SHA256 `3eed1458846785a91fdda8c6f5667d67722a30e1aceeb64bd84be5eb04273061`)
+**Image:** `gpucheck.img.xz` (ca. 2,7 GB) auf SourceForge: **<https://sourceforge.net/projects/gpucheck-stick/files/v1.4/>**
+(dort auch `gpucheck.img.xz.sha256`, SHA256 `54ba53eab57997457966c43eb9b78b0d479bea80a4addf383e0479b95dbfcf3f`)
 
 USB-Stick **ab 16 GB**, mit **Rufus** (Windows), **balenaEtcher** oder `dd` aufspielen.
 Details, Bedienung vor Ort und Deutung der Ergebnisse: **[ANLEITUNG.md](ANLEITUNG.md)**.
@@ -36,7 +36,7 @@ Zugang: Benutzer `gpu`, Passwort `gpu` (Autologin, `sudo` ohne Passwort).
 
 ## Stand
 
-- Auf echter Hardware getestet: **RTX 3090** (Ampere) mit Treiber 595.
+- Auf echter Hardware getestet: **RTX 3090** (Ampere) mit Treiber 595, inklusive VRAM- und Hotspot-Temperatur.
 - Ada und Blackwell: Code und Grenzwerte vorhanden, **noch nicht auf echter Karte getestet**.
   Rückmeldungen mit Report (`summary.txt` + `report.txt`) gern als Issue.
 
