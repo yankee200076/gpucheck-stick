@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>GPU-Check-Stick – Kurzanleitung</title>
+<style>
+@page{size:A4;margin:13mm 14mm}
+*{box-sizing:border-box}
+body{margin:0;color:#1b1f24;background:#fff;font:10.4pt/1.42 "Noto Sans","DejaVu Sans",system-ui,sans-serif}
+h1{font-size:19pt;margin:0 0 2mm;line-height:1.15}
+.sub{color:#5b6470;margin:0 0 5mm;font-size:10.5pt}
+.top{display:flex;justify-content:space-between;gap:8mm;align-items:flex-start;border-bottom:1.2pt solid #2f6f3e;padding-bottom:4mm;margin-bottom:5mm}
+.qr{text-align:center;font-size:8.5pt;color:#5b6470}
+.qr img{width:30mm;height:30mm;display:block}
+h2{font-size:12pt;margin:5mm 0 2mm;color:#2f6f3e}
+ol{margin:0;padding-left:5.5mm}
+ol li{margin-bottom:1.6mm}
+ul{margin:0;padding-left:5mm}
+ul li{margin-bottom:1mm}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:7mm}
+table{border-collapse:collapse;font-size:9.5pt;width:100%}
+td{border-bottom:.5pt solid #dde1e6;padding:1mm 1.5mm}
+.box{border:1pt solid #e0a640;background:#fff8e8;border-radius:2.5mm;padding:2.5mm 3.5mm;margin-top:4mm}
+.res td:first-child{font-weight:700;width:15mm}
+.pass{color:#2f7d3b}.warn{color:#a86b00}.fail{color:#b3261e}
+.foot{margin-top:5mm;font-size:8.5pt;color:#5b6470;border-top:.5pt solid #dde1e6;padding-top:2mm}
+</style>
+</head>
+<body>
+<div class="top">
+  <div>
+    <h1>GPU-Check-Stick – Kurzanleitung</h1>
+    <p class="sub">Gebrauchte NVIDIA-Grafikkarte (RTX 30 / 40 / 50) vor dem Kauf prüfen – in rund 5 Minuten,
+      direkt im PC des Verkäufers. Am PC wird nichts installiert oder verändert.</p>
+    <b>yankee200076.github.io/gpucheck-stick</b>
+  </div>
+  <div class="qr"><img src="qr.svg" alt="QR-Code">Download &amp; Infos</div>
+</div>
+
+<div class="cols">
+<div>
+  <h2>Vorher (zu Hause, einmal)</h2>
+  <ol>
+    <li>Image <b>gpucheck.img.xz</b> herunterladen (Link über den QR-Code).</li>
+    <li>Mit <b>Rufus</b> (Windows) oder <b>balenaEtcher</b> auf einen USB-Stick <b>ab 16 GB</b> schreiben.</li>
+    <li>Den Verkäufer fragen, ob du vor Ort kurz testen darfst.</li>
+  </ol>
+
+  <h2>Vor Ort</h2>
+  <ol>
+    <li>Monitor <b>an die Grafikkarte</b> anschließen, nicht ans Mainboard.</li>
+    <li>Jeden Stromstecker der Karte mit <b>eigenem Kabel</b> anschließen.</li>
+    <li>Stick einstecken, PC einschalten, sofort die <b>Boot-Menü-Taste</b> drücken (Tabelle rechts).</li>
+    <li>Den Eintrag <b>„UEFI: …“</b> mit dem Stick wählen.</li>
+    <li>Nach ca. 1 Minute erscheint der Desktop. <b>Oben links „GPU-Schnelltest“</b> doppelklicken.</li>
+    <li>Während der Grafiklast auf den Bildschirm achten: <b>Streifen, bunte Punkte, Flackern</b> = Defekt.</li>
+    <li>Nach rund 5 Minuten erscheint das Ergebnis. Foto machen, Stick abziehen, PC neu starten.</li>
+  </ol>
+
+  <div class="box"><b>Secure Boot nicht ausschalten!</b> Der Test läuft mit Secure Boot. Dann stehen nur
+    Hotspot- und Speichertemperatur auf „SKIP“ – das ist normal. Ausschalten kann bei Windows mit
+    BitLocker die Abfrage des Wiederherstellungsschlüssels auslösen. Das entscheidet nur der Besitzer.</div>
+</div>
+
+<div>
+  <h2>Boot-Menü-Taste</h2>
+  <table>
+    <tr><td>ASUS</td><td>F8</td><td>MSI</td><td>F11</td></tr>
+    <tr><td>Gigabyte</td><td>F12</td><td>ASRock</td><td>F11</td></tr>
+    <tr><td>Dell / Lenovo</td><td>F12</td><td>HP</td><td>F9</td></tr>
+  </table>
+  <p style="font-size:9pt;color:#5b6470;margin:1.5mm 0 0">Stick erscheint nicht? Anderen USB-Port (hinten am PC) probieren.</p>
+
+  <h2>Ergebnis lesen</h2>
+  <table class="res">
+    <tr><td class="pass">PASS</td><td>in Ordnung</td></tr>
+    <tr><td class="warn">WARN</td><td>auffällig – abwägen, Preis verhandeln</td></tr>
+    <tr><td class="fail">FAIL</td><td>harter Fehler – <b>nicht kaufen</b></td></tr>
+  </table>
+  <p style="margin:2mm 0 0">Typische FAIL-Gründe: Speicherfehler, Rechenfehler, Überhitzung, Drosselung durch
+    Stromversorgung, stehender Lüfter, falsche Speichergröße (Fälschung).</p>
+
+  <h2>Zusätzlich selbst prüfen</h2>
+  <ul>
+    <li><b>Spulenfiepen</b>: während der Last das Ohr an die Karte</li>
+    <li><b>Geruch</b> nach Verschmortem</li>
+    <li>Stromstecker und PCIe-Kontakte auf <b>Verfärbung</b> (Taschenlampe)</li>
+    <li>fehlende Schrauben, verbogene Kühlrippen, Garantiesiegel</li>
+  </ul>
+
+  <h2>Mehr Zeit?</h2>
+  <p style="margin:0">„GPU-Volltest“ (~20 Min.) heizt die Karte voll durch und findet auch Fehler, die erst warm auftreten.</p>
+</div>
+</div>
+
+<div class="foot">Kostenlos &amp; Open Source · Quellcode und ausführliche Anleitung: github.com/yankee200076/gpucheck-stick ·
+  Benutzer gpu, Passwort gpu · Ohne Gewähr – der Test senkt das Risiko eines Fehlkaufs, ist aber keine Garantie.</div>
+</body>
+</html>

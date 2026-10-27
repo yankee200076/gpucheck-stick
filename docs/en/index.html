@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU-Check-Stick</title>
+<meta name="description" content="Test a used NVIDIA graphics card before you buy: free boot stick, 5 minutes, PASS / WARN / FAIL – right in the seller's PC.">
+<link rel="alternate" hreflang="de" href="../">
+<style>
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --text:#1b1f24; --muted:#5b6470; --border:#dde1e6;
+  --accent:#2f6f3e; --accent-text:#ffffff; --accent-soft:#e6f2e8;
+  --pass:#2f7d3b; --warn:#a86b00; --fail:#b3261e; --code-bg:#11161c; --code-text:#d7dde4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#101317; --surface:#181c21; --text:#e6e9ed; --muted:#9aa4b0; --border:#2a3038;
+    --accent:#5fbf72; --accent-text:#0d1a10; --accent-soft:#1d2b20;
+    --pass:#6cc97d; --warn:#e0a640; --fail:#ef6b62; --code-bg:#0b0e12; --code-text:#d7dde4;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#101317; --surface:#181c21; --text:#e6e9ed; --muted:#9aa4b0; --border:#2a3038;
+  --accent:#5fbf72; --accent-text:#0d1a10; --accent-soft:#1d2b20;
+  --pass:#6cc97d; --warn:#e0a640; --fail:#ef6b62; --code-bg:#0b0e12; --code-text:#d7dde4;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif}
+.wrap{max-width:880px;margin:0 auto;padding:0 16px}
+header.hero{padding:56px 0 40px;border-bottom:1px solid var(--border);background:var(--surface)}
+.lang{float:right;font-size:14px;color:var(--muted)}
+.lang a{color:var(--muted)}
+h1{font-size:clamp(28px,5vw,42px);line-height:1.15;margin:0 0 14px;letter-spacing:-.01em}
+.lead{font-size:clamp(17px,2.4vw,20px);color:var(--muted);margin:0 0 26px;max-width:640px}
+.btns{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.btn{display:inline-block;padding:13px 22px;border-radius:10px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--text);background:var(--surface)}
+.btn.primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.small{font-size:14px;color:var(--muted)}
+section{padding:40px 0;border-bottom:1px solid var(--border)}
+h2{font-size:26px;margin:0 0 18px}
+h3{font-size:18px;margin:0 0 6px}
+.steps{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));counter-reset:s}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 18px 14px;position:relative}
+.step::before{counter-increment:s;content:counter(s);position:absolute;top:-14px;left:16px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-text);font-weight:700;display:grid;place-items:center;font-size:15px}
+.step h3{margin-top:8px}
+.step p{margin:0 0 6px;color:var(--muted);font-size:16px}
+.note{background:var(--accent-soft);border-radius:12px;padding:14px 18px;margin-top:20px}
+ul.checks{list-style:none;padding:0;margin:0;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+ul.checks li{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+ul.checks b{display:block}
+ul.checks span{color:var(--muted);font-size:15px}
+pre.report{background:var(--code-bg);color:var(--code-text);border-radius:12px;padding:16px;overflow-x:auto;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:0}
+.p{color:#6cc97d;font-weight:700}
+.result-legend{display:flex;flex-wrap:wrap;gap:18px;margin:14px 0 0;font-size:15px}
+.result-legend b.pass{color:var(--pass)} .result-legend b.warn{color:var(--warn)} .result-legend b.fail{color:var(--fail)}
+.tpl{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.tpl p{margin:6px 0 0;white-space:pre-line}
+.copy{float:right;font-size:14px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer}
+details{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:10px}
+summary{cursor:pointer;font-weight:600}
+details p{margin:10px 0 2px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:15px}
+td,th{border-bottom:1px solid var(--border);padding:7px 6px;text-align:left}
+footer{padding:30px 0 50px;color:var(--muted);font-size:14px}
+a{color:var(--accent)}
+.qr{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.qr img{width:132px;height:132px;background:#fff;border-radius:8px;padding:6px}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="lang"><a href="../">DE</a> · <b>EN</b></div>
+    <h1>Buying a used graphics card?<br>Test first, then pay.</h1>
+    <p class="lead">A free USB stick checks NVIDIA cards (RTX&nbsp;30, 40 and 50) in about 5&nbsp;minutes –
+      right in the seller's PC. You get <b>PASS</b>, <b>WARN</b> or <b>FAIL</b> with a reason.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://sourceforge.net/projects/gpucheck-stick/files/v1.4/gpucheck.img.xz/download">Download image (2.7&nbsp;GB)</a>
+      <a class="btn" href="../kurzanleitung.pdf">Quick guide (PDF, German)</a>
+    </div>
+    <p class="small">Version 1.4 · free and open source · no account needed · the stick's interface is in German</p>
+  </div>
+</header>
+<main>
+<section><div class="wrap">
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="step"><h3>Create the stick</h3><p>Once, at home: download the image and write it to a USB stick (16&nbsp;GB or larger)
+      with <a href="https://rufus.ie">Rufus</a> (Windows) or <a href="https://etcher.balena.io">balenaEtcher</a>.</p></div>
+    <div class="step"><h3>Boot at the seller's</h3><p>Plug the stick into the PC that holds the card. While it powers on, open the boot menu
+      (usually <b>F8</b>, <b>F11</b> or <b>F12</b>) and pick the USB stick.</p></div>
+    <div class="step"><h3>Run the test</h3><p>After about a minute the desktop appears. Double-click <b>“GPU-Schnelltest”</b>
+      (quick test) in the top left and wait 5&nbsp;minutes.</p></div>
+  </div>
+  <div class="note"><b>Nothing is installed or changed on the seller's PC.</b> Everything runs from the stick and no boot
+    entries are created. Please don't change BIOS settings – see <a href="#secureboot">Secure Boot</a>.</div>
+</div></section>
+<section><div class="wrap">
+  <h2>What gets checked</h2>
+  <ul class="checks">
+    <li><b>Authenticity</b><span>Model, memory size, BIOS – against fake or reflashed cards</span></li>
+    <li><b>Video memory</b><span>Memory test across the whole VRAM: faulty chips show up immediately</span></li>
+    <li><b>Compute errors under full load</b><span>The card computes at full power; every wrong result counts</span></li>
+    <li><b>Artifacts</b><span>Full-screen 3D load – stripes or coloured dots are easy to spot</span></li>
+    <li><b>Temperatures</b><span>Core, hotspot and memory: reveal dried-out paste and worn thermal pads</span></li>
+    <li><b>Power, clocks, fans</b><span>Does the card reach its power limit? Do all fans spin?</span></li>
+    <li><b>Power delivery &amp; slot</b><span>Power-related throttling, PCIe link, driver error messages</span></li>
+  </ul>
+</div></section>
+<section><div class="wrap">
+  <h2>What the result looks like</h2>
+  <p class="small">Real test of an RTX&nbsp;3090 (quick test, shortened; the stick reports in German):</p>
+<pre class="report"> ZUSAMMENFASSUNG   NVIDIA GeForce RTX 3090
+==================================================================
+ <span class="p">PASS</span>  VRAM-Größe               24576 MiB (erwartet 24 GiB für ID 2204)
+ <span class="p">PASS</span>  VRAM-Test                keine Fehler, 1795 Iterationen in 120 s
+ <span class="p">PASS</span>  CUDA-Rechenfehler        gpu-burn: keine Rechenfehler
+ <span class="p">PASS</span>  Grafiklast               vkmark 30s ohne Absturz, Ø 2822 FPS
+ <span class="p">PASS</span>  GPU-Temperatur           max 74 °C
+ <span class="p">PASS</span>  Hotspot-Abstand          Ø 18.6 °C über Kern unter Last
+ <span class="p">PASS</span>  VRAM-Temperatur          max 96 °C (GDDR6X, Grenze WARN 100)
+ <span class="p">PASS</span>  Leistungsaufnahme        Ø 345.6 W = 99% des Limits 350.0 W
+ <span class="p">PASS</span>  Lüfter                   Ø 63.0 % unter Last, 2 Lüfter, min 1436 RPM
+------------------------------------------------------------------
+ GESAMT: <span class="p">PASS</span></pre>
+  <div class="result-legend">
+    <span><b class="pass">PASS</b> fine</span>
+    <span><b class="warn">WARN</b> noticeable – weigh it up, negotiate</span>
+    <span><b class="fail">FAIL</b> hard fault – don't buy</span>
+  </div>
+</div></section>
+<section><div class="wrap">
+  <h2>Message templates</h2>
+  <div class="tpl"><button class="copy" data-target="t1">Copy</button><b>As a buyer – asking the seller</b>
+    <p id="t1">Hi, I'm interested in the graphics card. Would it be OK if I test it briefly when I come by? I'll bring a USB stick your PC boots from – nothing gets installed or changed on your PC. The test takes about 5 minutes. Details: https://yankee200076.github.io/gpucheck-stick/en/</p></div>
+  <div class="tpl"><button class="copy" data-target="t2">Copy</button><b>As a seller – paragraph for your listing</b>
+    <p id="t2">This card was tested with GPU-Check-Stick: overall PASS (memory test without errors, no compute errors under full load, VRAM max __ °C, hotspot delta __ °C). Photo of the result attached. Happy to let you test it yourself: https://yankee200076.github.io/gpucheck-stick/en/</p></div>
+</div></section>
+<section><div class="wrap">
+  <h2>FAQ</h2>
+  <details><summary>Do I need Linux skills?</summary><p>No. The stick boots straight into a desktop with large icons. One double-click starts the test.</p></details>
+  <details><summary>Which cards are supported?</summary><p>NVIDIA GeForce RTX 30 (Ampere), RTX 40 (Ada) and RTX 50 (Blackwell). Not AMD or Intel.
+    So far tested on real hardware: RTX&nbsp;3090.</p></details>
+  <details><summary>What do I need on site?</summary><p>The stick, a monitor connected <b>to the graphics card</b> (not the motherboard) and a PC with a
+    sufficient power supply. Connect every power plug of the card with its own cable.</p></details>
+  <details open id="secureboot"><summary>What about Secure Boot? (important)</summary>
+    <p>The stick boots <b>with Secure Boot enabled</b> – that's the normal way to test. All key checks run: memory test,
+      compute errors, artifacts, core temperature, power, fans. Only hotspot and memory temperature show “SKIP” – that is not a bad sign.</p>
+    <p>Those two readings need Secure Boot <b>disabled</b>. Only the PC owner should decide that: if Windows uses
+      <b>BitLocker</b> or device encryption (default on many new PCs), Windows will ask for the <b>recovery key</b> afterwards.
+      Some games with anti-cheat also require Secure Boot – so turn it back on.</p>
+    <p>Easiest: the seller tests beforehand with Secure Boot disabled and posts the result in the listing.</p></details>
+  <details><summary>What does the test not detect?</summary><p>Coil whine (listen to the card), smell, visible damage and rare faults that only show up after hours.
+    The test greatly lowers the risk of a bad purchase but is no guarantee.</p></details>
+</div></section>
+</main>
+<footer><div class="wrap">
+  Source code, full guide and licenses on <a href="https://github.com/yankee200076/gpucheck-stick">GitHub</a>.
+  Image checksum (SHA256): <code>54ba53eab57997457966c43eb9b78b0d479bea80a4addf383e0479b95dbfcf3f</code>.<br>
+  No warranty. Use at your own risk; the test loads the card like a demanding game.
+</div></footer>
+<script>
+document.querySelectorAll('.copy').forEach(function(b){
+  b.addEventListener('click', function(){
+    var t=document.getElementById(b.dataset.target).textContent;
+    try{ navigator.clipboard.writeText(t).then(function(){ b.textContent='Copied'; setTimeout(function(){b.textContent='Copy'},1500); }); }
+    catch(e){ b.textContent='Please select'; }
+  });
+});
+</script>
+</body>
+</html>
