@@ -411,10 +411,13 @@ throttle_pct() {   # throttle_pct CSV BIT(dezimal, Zweierpotenz) [SKIP] – port
         { v=$c; if (v !~ /^0x/) next; n++; if (int(hex(v)/m)%2==1) k++ }
         END { if (!n) print 0; else printf "%.1f\n", 100*k/n }' "$1"
 }
-# Minimale Einzellüfter-RPM über die Phase (ab SKIP), leer wenn nicht auslesbar
+# Minimale Einzellüfter-RPM über die Phase (ab SKIP), leer wenn nicht auslesbar.
+# Messpunkte mit Lüfter-Soll 0 % zählen nicht: Zero-RPM-Modus (Lüfter stehen absichtlich, bis die
+# Karte warm ist – z. B. RX 6900 XT unter ~50 °C, auch viele NVIDIA-Partnerkarten).
 fan_rpm_min() {
-    awk -F, -v skip="${2:-0}" 'NR==1{for(i=1;i<=NF;i++) if($i=="fan_rpm") c=i; next}
-        $1<skip||$c==""{next} {n=split($c,a,";"); for(i=1;i<=n;i++){ if(!s||a[i]+0<mn) mn=a[i]+0; s=1 }}
+    awk -F, -v skip="${2:-0}" 'NR==1{for(i=1;i<=NF;i++){ if($i=="fan_rpm") c=i; if($i=="fan_pct") p=i }; next}
+        $1<skip||$c==""{next} p && $p!="" && $p+0==0 {next}
+        {n=split($c,a,";"); for(i=1;i<=n;i++){ if(!s||a[i]+0<mn) mn=a[i]+0; s=1 }}
         END{ if(s) print mn }' "$1"
 }
 # Anteil Messpunkte (%), in denen ein Lüfter 0 RPM hat, während ein anderer >= 500 RPM dreht
