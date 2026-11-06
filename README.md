@@ -30,7 +30,7 @@ Grenzwerte pro Generation sind in [`gpu-check.sh`](gpu-check.sh) (Funktion `set_
 ## Download und Stick erstellen
 
 **Image:** `gpucheck.img.xz` (ca. 2,7 GB) auf SourceForge: **<https://sourceforge.net/projects/gpucheck-stick/files/v1.5/>**
-(dort auch `gpucheck.img.xz.sha256`, SHA256 `SHA_V15`)
+(dort auch `gpucheck.img.xz.sha256`, SHA256 `2187cc9be0a89e7c514235c2ed750d91ac938f5f33e90bc97ac53028003e408c`)
 
 USB-Stick **ab 16 GB**, mit **Rufus** (Windows), **balenaEtcher** oder `dd` aufspielen.
 Details, Bedienung vor Ort und Deutung der Ergebnisse: **[ANLEITUNG.md](ANLEITUNG.md)**.
