@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GPU-Check-Stick</title>
-<meta name="description" content="Test a used NVIDIA graphics card before you buy: free boot stick, 5 minutes, PASS / WARN / FAIL – right in the seller's PC.">
+<meta name="description" content="Test a used graphics card (NVIDIA or AMD) before you buy: free boot stick, 5 minutes, PASS / WARN / FAIL – right in the seller's PC.">
 <link rel="alternate" hreflang="de" href="../">
 <style>
 :root{
@@ -72,13 +72,13 @@ a{color:var(--accent)}
   <div class="wrap">
     <div class="lang"><a href="../">DE</a> · <b>EN</b></div>
     <h1>Buying a used graphics card?<br>Test first, then pay.</h1>
-    <p class="lead">A free USB stick checks NVIDIA cards (RTX&nbsp;30, 40 and 50) in about 5&nbsp;minutes –
+    <p class="lead">A free USB stick checks NVIDIA cards (RTX&nbsp;30, 40, 50) and AMD cards (RX&nbsp;6000, 7000, 9000) in about 5&nbsp;minutes –
       right in the seller's PC. You get <b>PASS</b>, <b>WARN</b> or <b>FAIL</b> with a reason.</p>
     <div class="btns">
-      <a class="btn primary" href="https://sourceforge.net/projects/gpucheck-stick/files/v1.4/gpucheck.img.xz/download">Download image (2.7&nbsp;GB)</a>
+      <a class="btn primary" href="https://sourceforge.net/projects/gpucheck-stick/files/v1.5/gpucheck.img.xz/download">Download image (2.7&nbsp;GB)</a>
       <a class="btn" href="../kurzanleitung.pdf">Quick guide (PDF, German)</a>
     </div>
-    <p class="small">Version 1.4 · free and open source · no account needed · the stick's interface is in German</p>
+    <p class="small">Version 1.5 · free and open source · no account needed · the stick's interface is in German</p>
   </div>
 </header>
 <main>
@@ -139,8 +139,10 @@ a{color:var(--accent)}
 <section><div class="wrap">
   <h2>FAQ</h2>
   <details><summary>Do I need Linux skills?</summary><p>No. The stick boots straight into a desktop with large icons. One double-click starts the test.</p></details>
-  <details><summary>Which cards are supported?</summary><p>NVIDIA GeForce RTX 30 (Ampere), RTX 40 (Ada) and RTX 50 (Blackwell). Not AMD or Intel.
-    So far tested on real hardware: RTX&nbsp;3090.</p></details>
+  <details><summary>Which cards are supported?</summary><p>NVIDIA GeForce RTX 30 (Ampere), RTX 40 (Ada) and RTX 50 (Blackwell), and since version 1.5
+    AMD Radeon RX 6000 (RDNA2), RX 7000 (RDNA3) and RX 9000 (RDNA4). Not Intel.
+    So far tested on real hardware: RTX&nbsp;3090 and RX&nbsp;6900&nbsp;XT. On AMD cards, hotspot and VRAM
+    temperatures are read even with Secure Boot on.</p></details>
   <details><summary>What do I need on site?</summary><p>The stick, a monitor connected <b>to the graphics card</b> (not the motherboard) and a PC with a
     sufficient power supply. Connect every power plug of the card with its own cable.</p></details>
   <details open id="secureboot"><summary>What about Secure Boot? (important)</summary>
@@ -156,7 +158,7 @@ a{color:var(--accent)}
 </main>
 <footer><div class="wrap">
   Source code, full guide and licenses on <a href="https://github.com/yankee200076/gpucheck-stick">GitHub</a>.
-  Image checksum (SHA256): <code>54ba53eab57997457966c43eb9b78b0d479bea80a4addf383e0479b95dbfcf3f</code>.<br>
+  Image checksum (SHA256): <code>SHA_V15</code>.<br>
   No warranty. Use at your own risk; the test loads the card like a demanding game.
 </div></footer>
 <script>

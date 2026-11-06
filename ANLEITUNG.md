@@ -1,8 +1,10 @@
 # GPU-Check-Stick – Anleitung für vor Ort
 
-Bootfähiger USB-Stick zum Prüfen gebrauchter NVIDIA-Grafikkarten
-(Ampere RTX 30xx, Ada RTX 40xx, Blackwell RTX 50xx).
-Ubuntu 26.04 LTS, NVIDIA-Treiber 595 (Open-Kernel-Module). Der Test läuft komplett offline;
+Bootfähiger USB-Stick zum Prüfen gebrauchter Grafikkarten: NVIDIA (Ampere RTX 30xx, Ada RTX 40xx,
+Blackwell RTX 50xx) und seit v1.5 AMD (RX 6000/7000/9000, RDNA2–4).
+Ubuntu 26.04 LTS, NVIDIA-Treiber 595 (Open-Kernel-Module), AMD: amdgpu + Mesa/RADV.
+Bei AMD entfällt der CUDA-Test (gpu-burn); memtest_vulkan lastet die Karte dabei bis zum Power-Limit aus.
+Hotspot- und VRAM-Temperatur liest der Stick bei AMD auch mit Secure Boot. Der Test läuft komplett offline;
 Internet ist nur für Browser, Claude Code und opencode nötig.
 
 Benutzer: `gpu`, Passwort: `gpu` (Autologin, `sudo` ohne Passwort)
@@ -106,6 +108,7 @@ Am Ende erscheinen ein Fenster und die Terminalausgabe mit einer Zeile pro Prüf
 | Lüfter | Lüfter steht oder läuft nicht hoch |
 | PCIe-Link | WARN: Gen/Breite reduziert, Kontakte/Steckplatz/Riser |
 | Xid-Fehler | Treiber meldet Hardwarefehler (z. B. Xid 79: vom Bus gefallen) |
+| GPU-Fehler (amdgpu) | AMD: Ring-Timeout, GPU-Reset oder Page-Fault während des Tests = FAIL |
 
 Der Report liegt auf dem Stick in der Partition **GPUREPORTS** (exFAT, unter
 Windows/macOS lesbar), z. B. `2026-10-25_143012_NVIDIA_GeForce_RTX_3090/`:
@@ -113,7 +116,7 @@ Windows/macOS lesbar), z. B. `2026-10-25_143012_NVIDIA_GeForce_RTX_3090/`:
 - `summary.txt`: Zusammenfassung
 - `report.txt`: vollständiges Protokoll
 - `monitor.csv`, `burn.csv`, …: Messwerte pro Sekunde (in Excel/LibreOffice öffnen)
-- `nvidia-smi-q.txt`, `lspci.txt`, `kernel.log`: Rohdaten
+- `nvidia-smi-q.txt` bzw. `amdgpu-sysfs.txt`, `lspci.txt`, `kernel.log`: Rohdaten
 - `memtest_vulkan.out`, `gpu_burn.out`, `vkmark.out`: Ausgaben der Testprogramme
 
 ## 5. Was der Test NICHT erkennt
