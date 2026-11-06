@@ -39,6 +39,8 @@ unlink "$M/root/image-stage.sh"
 umount "$M/dev/pts" "$M/run" "$M/dev" "$M/sys" "$M/proc"
 rm -rf "$M"/var/cache/apt/archives/*.deb "$M"/var/cache/apt/*.bin "$M"/root/.cache
 find "$M/var/log" -type f -exec truncate -s 0 {} +
+# Nameserver des Build-Rechners (resolvconf-Sicherung, alter Stub unter /run des Images)
+rm -f "$M/etc/.resolv.conf.systemd-resolved.bak" "$M/run/systemd/resolve/stub-resolv.conf"
 
 # --- Reports-Partition: Anleitung, Skript, Build-Skripte
 # komplett leeren (blkdiscard = Nullen, auch gelöschte Reste) und neu formatieren, gleiche UUID wie in fstab
@@ -50,9 +52,17 @@ cp "$M/opt/gpucheck/README.md" "$M/opt/gpucheck/gpu-check.sh" "$M.rep/"
 umount "$M.rep"; rmdir "$M.rep"
 
 # --- freie Blöcke leeren, Journal neu, Kontrolle
-fstrim -v "$M"; umount "$M"
+fstrim -v "$M"; sync
+for i in $(seq 10); do umount "$M" && break; sleep 2; done   # Dateibeobachter (z. B. opencode) halten kurz fest
+# Sicherungskopien der reservierten GDT-Blöcke (Resize-Inode 7) nullen: fstrim erreicht sie nicht,
+# sie enthielten noch Daten vom Quell-Stick (v1.5 gefunden). Die (IND)-Blöcke selbst bleiben.
+debugfs -R "stat <7>" "${LOOP}p3" 2>/dev/null | grep -oE '\([0-9]+\):[0-9]+' | cut -d: -f2 |
+    python3 -I -c 'import os,sys
+fd=os.open(sys.argv[1],os.O_WRONLY); z=bytes(4096); n=0
+for l in sys.stdin: os.pwrite(fd,z,int(l)*4096); n+=1
+os.fsync(fd); print("Resize-Inode: %d Blöcke genullt"%n)' "${LOOP}p3"
 tune2fs -O ^has_journal "${LOOP}p3" >/dev/null
-mount "${LOOP}p3" "$M"; fstrim "$M"; umount "$M"
+mount "${LOOP}p3" "$M"; fstrim "$M"; sync; for i in $(seq 10); do umount "$M" && break; sleep 2; done
 tune2fs -O has_journal "${LOOP}p3" >/dev/null
 e2fsck -fy "${LOOP}p3"
 losetup -d "$LOOP"; trap - EXIT; rmdir "$M"

@@ -88,6 +88,13 @@ fstrim -v "$M"                               # Loop-Device: Löcher in die Datei
 umount "$M"
 e2fsck -fy "${LOOP}p3"
 resize2fs "${LOOP}p3" ${ROOT_GIB}G
+# Sicherungskopien der reservierten GDT-Blöcke (Resize-Inode 7) nullen: fstrim erreicht sie nicht,
+# sie enthielten alte Daten des Quell-Sticks (Putty-Sitzungen, Browser-Cache; gefunden bei v1.5)
+debugfs -R "stat <7>" "${LOOP}p3" 2>/dev/null | grep -oE '\([0-9]+\):[0-9]+' | cut -d: -f2 |
+    python3 -I -c 'import os,sys
+fd=os.open(sys.argv[1],os.O_WRONLY); z=bytes(4096); n=0
+for l in sys.stdin: os.pwrite(fd,z,int(l)*4096); n+=1
+os.fsync(fd); print("Resize-Inode: %d Blöcke genullt"%n)' "${LOOP}p3"
 # ext4-Journal enthält noch Metadaten gelöschter Dateien (z. B. Dateinamen mit Plattenmodellen
 # des Test-PCs) -> Journal entfernen, freie Blöcke erneut leeren, Journal neu (genullt) anlegen
 tune2fs -O ^has_journal "${LOOP}p3" >/dev/null
