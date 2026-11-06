@@ -6,6 +6,7 @@ U=gpu; H=/home/$U
 
 apt-get update
 apt-get -y install cloud-guest-utils gdisk        # growpart, sgdisk
+apt-get -y install btop net-tools                 # Live-Monitor, ifconfig/netstat (ab v1.5)
 
 # --- Root-Partition beim ersten Start auf den ganzen Stick vergrößern
 cat > /usr/local/sbin/gpucheck-grow-root <<'EOF'
@@ -32,6 +33,28 @@ WantedBy=multi-user.target
 EOF
 touch /etc/gpucheck-grow-root
 systemctl enable gpucheck-grow-root.service
+
+# --- LightDM erst starten, wenn der GPU-Treiber die Grafik übernommen hat (ab v1.5).
+#     amdgpu löst simpledrm erst ~8–10 s nach dem Start ab; startet X vorher, stürzt es ab
+#     (modesetting, SIGSEGV) und LightDM zeigt statt Autologin den Anmeldebildschirm (RX 6900 XT, B450).
+cat > /usr/local/sbin/gpucheck-wait-gpu <<'EOF'
+#!/bin/sh
+# Wartet bis zu 20 s auf ein DRM-Gerät eines echten GPU-Treibers (nicht simpledrm/efifb).
+for i in $(seq 1 40); do
+    for c in /sys/class/drm/card[0-9]*; do
+        [ -e "$c/device/driver" ] || continue
+        case $(basename "$(readlink "$c/device/driver")") in
+            simple-framebuffer|simpledrm|efi-framebuffer) ;;
+            *) exit 0 ;;
+        esac
+    done
+    sleep 0.5
+done
+exit 0   # nie blockieren – notfalls mit dem Bildpuffer weiter
+EOF
+chmod 755 /usr/local/sbin/gpucheck-wait-gpu
+mkdir -p /etc/systemd/system/lightdm.service.d
+printf '[Service]\nExecStartPre=/usr/local/sbin/gpucheck-wait-gpu\n' > /etc/systemd/system/lightdm.service.d/gpucheck-wait-gpu.conf
 
 # --- Claude Code: nicht im Image (proprietär), Installation beim ersten Aufruf
 unlink /usr/local/bin/claude 2>/dev/null || true

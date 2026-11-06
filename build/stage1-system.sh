@@ -61,7 +61,7 @@ apt-get -y install xorg xserver-xorg-video-all xfce4 xfce4-terminal xfce4-taskma
     network-manager network-manager-gnome \
     pciutils usbutils lshw dmidecode lm-sensors smartmontools nvme-cli \
     vulkan-tools mesa-utils mesa-vulkan-drivers libvulkan1 vkmark glmark2-x11 \
-    nvtop stress-ng jq bc gawk exfatprogs less nano htop tmux \
+    nvtop stress-ng jq bc gawk exfatprogs less nano htop btop net-tools tmux \
     python3 x11-xserver-utils xdotool
 
 # Benutzer mit Autologin, sudo ohne Passwort (Test-Stick, kein Daten-PC)

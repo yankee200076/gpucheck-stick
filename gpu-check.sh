@@ -1,19 +1,21 @@
 #!/bin/bash
 # =============================================================================
-# gpu-check.sh – Prüfung gebrauchter NVIDIA-Grafikkarten (Ampere … Blackwell)
+# gpu-check.sh – Prüfung gebrauchter Grafikkarten: NVIDIA (Ampere … Blackwell)
+#                und AMD Radeon (RDNA2 … RDNA4, ab v1.5)
 #
 #   gpu-check.sh --quick        Schnelltest  (~5 Min.)
 #   gpu-check.sh --full         Volltest     (~20 Min.)
 #   gpu-check.sh --help         alle Optionen
 #
 # Ablauf: Identifikation -> Leerlauf -> VRAM-Test (memtest_vulkan)
-#         -> CUDA-Volllast (gpu-burn) -> Vulkan-Grafiklast (vkmark)
+#         -> CUDA-Volllast (gpu-burn, nur NVIDIA) -> Vulkan-Grafiklast (vkmark)
+#         AMD: Sensoren aus sysfs/hwmon (auch mit Secure Boot), memtest_vulkan = Volllast
 #         -> Kernel-Log (Xid/AER) -> Zusammenfassung PASS/WARN/FAIL
 #
 # Ergebnis: Ordner mit Zeitstempel auf der Partition GPUREPORTS des Sticks.
 # =============================================================================
 set -u
-VERSION="1.4"
+VERSION="1.5"
 # Zahlen immer mit Punkt (CSV, printf, awk) – Texte bleiben deutsch/UTF-8
 [ -n "${LC_ALL:-}" ] && export LANG="$LC_ALL"
 unset LC_ALL
@@ -26,28 +28,30 @@ GPUBURN_DIR=${GPUBURN_DIR:-$GPUCHECK_HOME/gpu-burn}
 GPUTEMPS_BIN=${GPUTEMPS_BIN:-$GPUCHECK_HOME/bin/gputemps}   # VRAM- + Hotspot-Temperatur (Apache-2.0)
 REPORT_ROOT=${REPORT_ROOT:-/mnt/reports}
 NV_ICD=${NV_ICD:-/usr/share/vulkan/icd.d/nvidia_icd.json}
+AMD_ICD=${AMD_ICD:-/usr/share/vulkan/icd.d/radeon_icd.json}
 DESKTOP_USER=${DESKTOP_USER:-gpu}
 PCI_SYSFS=${PCI_SYSFS:-/sys/bus/pci/devices}
 
 # ----------------------------------------------------------- Parameter -------
 MODE=quick
-GPU=0            # nvidia-smi-Index der zu prüfenden Karte
+GPU=0            # Index der zu prüfenden Karte (NVIDIA: nvidia-smi-Index, AMD: n-te Radeon am PCIe-Bus)
+VENDOR=""       # nvidia | amd (automatisch)
 ASK=1            # nach sichtbaren Bildfehlern fragen
 DO_MEMTEST=1 DO_BURN=1 DO_GL=1
 T_IDLE= T_MEMTEST= T_BURN= T_GL=
 
 usage() {
 cat <<EOF
-gpu-check.sh $VERSION – Gebrauchtkarten-Check für NVIDIA-GPUs
+gpu-check.sh $VERSION – Gebrauchtkarten-Check für NVIDIA- und AMD-GPUs
 
   -q, --quick          Schnelltest (Standard): Idle 15 s, VRAM 120 s, CUDA 120 s, Vulkan 30 s
   -f, --full           Volltest:               Idle 30 s, VRAM 330 s, CUDA 600 s, Vulkan 120 s
       --memtest SEK    Dauer VRAM-Test überschreiben
-      --burn SEK       Dauer CUDA-Volllast überschreiben
+      --burn SEK       Dauer CUDA-Volllast überschreiben (nur NVIDIA)
       --gl SEK         Dauer Vulkan-Grafiklast überschreiben
       --idle SEK       Dauer Leerlaufmessung überschreiben
       --no-memtest | --no-burn | --no-gl   Teiltests auslassen
-      --gpu N          Karte N laut nvidia-smi-Index (Standard 0)
+      --gpu N          Karte N (NVIDIA: nvidia-smi-Index, AMD: Reihenfolge am PCIe-Bus; Standard 0)
       --no-ask         nicht nach Bildfehlern fragen (unbeaufsichtigt)
       --out DIR        Report-Verzeichnis (Standard $REPORT_ROOT)
   -h, --help           diese Hilfe
@@ -202,7 +206,23 @@ set_limits() {
     # Leerlauf-Leistung > 20 % des Default-Power-Limits: WARN (z. B. 3090: > ~70 W).
     LIM_IDLE_PWR_PCT=20
     # Erwartete PCIe-Generation der Karte (max. GPU-seitig)
-    case "$arch" in Ampere|Ada*) EXP_GEN=4 ;; Blackwell) EXP_GEN=5 ;; *) EXP_GEN=0 ;; esac
+    case "$arch" in Ampere|Ada*|RDNA2|RDNA3) EXP_GEN=4 ;; Blackwell|RDNA4) EXP_GEN=5 ;; *) EXP_GEN=0 ;; esac
+
+    # --- AMD Radeon (ab v1.5, vorläufig – bisher nur RX 6900 XT als Referenz):
+    #  Kern = "edge" (Gehäusekante des Chips), liegt deutlich unter Hotspot.
+    #  Hotspot ("junction"): AMD regelt bis 110 °C (crit), Notabschaltung 115 °C.
+    #  Abstand Hotspot – edge ist bei AMD konstruktionsbedingt größer als bei NVIDIA
+    #  (RX 6900 XT gesund: Ø 19 °C bei 255 W), daher WARN 30 / FAIL 40.
+    #  VRAM GDDR6: crit 100 °C, Notabschaltung 105 °C.
+    #  Leistung/Takt werden unter memtest_vulkan bewertet (zieht bei AMD das volle Power-Limit);
+    #  Takt relativ zum höchsten DPM-Takt (pp_dpm_sclk), da AMD keinen "Basistakt" meldet.
+    case "$arch" in RDNA*)
+        LIM_CORE_WARN=85; LIM_CORE_FAIL=95
+        LIM_HOT_WARN=100; LIM_HOT_FAIL=108
+        LIM_HOTDELTA_WARN=30; LIM_HOTDELTA_FAIL=40
+        LIM_VRAM_WARN=90; LIM_VRAM_FAIL=98
+        LIM_CLK_WARN_PCT=75; LIM_CLK_FAIL_PCT=60 ;;
+    esac
 }
 
 # Bekannte Device-IDs -> erwartete VRAM-Größe (GiB). Nur Fälschungs-Plausibilität:
@@ -253,6 +273,58 @@ ref_base_clk() {
     esac
 }
 
+# AMD: Device-ID -> Architektur und (nur bei eindeutiger ID) erwartete VRAM-Größe (GiB).
+# Mehrdeutige IDs (z. B. 744c = 7900 XTX 24 GB / XT 20 GB / GRE 16 GB) bleiben leer.
+amd_arch() {
+    case "${1,,}" in
+        73[0-9a-f][0-9a-f]|74[0-3][0-9a-f]) echo RDNA2 ;;
+        74[4-9a-f][0-9a-f]) echo RDNA3 ;;
+        75[0-9a-f][0-9a-f]) echo RDNA4 ;;
+        *) echo "" ;;
+    esac
+}
+amd_expected_vram_gib() {
+    case "${1,,}" in
+        73bf|73a5) echo 16 ;;          # RX 6800 / 6800 XT / 6900 XT, RX 6950 XT
+        73ff) echo 8 ;;                # RX 6600 / 6600 XT
+        7550) echo 16 ;;               # RX 9070 / 9070 XT
+        *) echo "" ;;
+    esac
+}
+
+# ----------------------------------------------------- AMD: sysfs / hwmon -----
+# Alle Werte direkt vom amdgpu-Treiber, ohne Zusatztool und auch mit Secure Boot.
+HW=""          # hwmon-Verzeichnis der AMD-Karte
+LINK_SYS=""    # PCI-Gerät, dessen Link zum Steckplatz führt (AMD: Switch-Eingang der Karte)
+rdiv() {   # rdiv DATEI TEILER -> gerundeter Wert, leer wenn nicht lesbar
+    local v; v=$(cat "$1" 2>/dev/null) || { echo ""; return; }
+    awk -v v="$v" -v d="$2" 'BEGIN{ if (v ~ /^-?[0-9]+$/) printf "%.0f", v/d }'
+}
+amd_power_w() { local f=$HW/power1_average; [ -f "$f" ] || f=$HW/power1_input; rdiv "$f" 1000000; }
+amd_fan_pct() {
+    local p m; p=$(cat "$HW/pwm1" 2>/dev/null) || return 0; m=$(cat "$HW/pwm1_max" 2>/dev/null || echo 255)
+    awk -v p="$p" -v m="$m" 'BEGIN{ if (m>0) printf "%.0f", 100*p/m }'
+}
+# Eine CSV-Zeile in der Spaltenreihenfolge von SMI_WANT (gleiches Format wie bei NVIDIA)
+amd_line() {
+    printf '%s,,%s,%s,%s,%s,%s,%s,%s,%s,,,%s,\n' \
+        "$(rdiv "$HW/temp1_input" 1000)" "$(rdiv "$HW/freq1_input" 1000000)" "$(rdiv "$HW/freq2_input" 1000000)" \
+        "$(amd_power_w)" "$(rdiv "$HW/power1_cap" 1000000)" "$(amd_fan_pct)" "$(cat "$SYS/gpu_busy_percent" 2>/dev/null)" \
+        "$(gt2gen "$(cat "$LINK_SYS/current_link_speed" 2>/dev/null)")" "$(cat "$LINK_SYS/current_link_width" 2>/dev/null)" \
+        "$(rdiv "$SYS/mem_info_vram_used" 1048576)"
+}
+# Navi-Karten haben einen PCIe-Switch auf der Karte: der Link GPU<->Switch meldet immer
+# Gen4 x16, der echte Link zum Steckplatz liegt am obersten AMD-Bridge-Port darüber.
+amd_link_dev() {
+    local d=$1 p
+    while :; do
+        p=$(dirname "$(readlink -f "$d")")
+        [ -f "$p/vendor" ] && [ "$(cat "$p/vendor")" = 0x1002 ] && [ -f "$p/current_link_speed" ] || break
+        d=$p
+    done
+    readlink -f "$d"
+}
+
 # =============================================================================
 #  SAMPLER: jede Sekunde eine CSV-Zeile
 # =============================================================================
@@ -287,13 +359,14 @@ gputemp_now() {   # gputemp_now vram|junction
     [ -n "$GPUTEMPS_RAW" ] && [ -s "$GPUTEMPS_RAW" ] || { echo ""; return; }
     tail -n 3 "$GPUTEMPS_RAW" | grep '}]}$' | tail -1 | grep -o "\"$1\":[0-9]*" | cut -d: -f2
 }
-vram_temp_now() { gputemp_now vram; }
-hotspot_now()   { gputemp_now junction; }
+vram_temp_now() { if [ "$VENDOR" = amd ]; then rdiv "$HW/temp3_input" 1000; else gputemp_now vram; fi; }
+hotspot_now()   { if [ "$VENDOR" = amd ]; then rdiv "$HW/temp2_input" 1000; else gputemp_now junction; fi; }
 
 FAN_RPM_OK=0
 fan_rpm_now() {   # "1520;1490;1510" – je Lüfter, über nvidia-settings (braucht X auf der NVIDIA-Karte)
     # Ziel [fan] explizit: bei DISPLAY=:0.0 fragt nvidia-settings sonst nur den X-Screen ab -> leer
     [ "$FAN_RPM_OK" = 1 ] || { echo ""; return; }
+    [ "$VENDOR" = amd ] && { cat "$HW/fan1_input" 2>/dev/null; return; }
     runuser -u "$DESKTOP_USER" -- env DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-/home/$DESKTOP_USER/.Xauthority}" \
         timeout 3 nvidia-settings -q '[fan]/GPUCurrentFanSpeedRPM' 2>/dev/null \
         | sed -n 's/.*\[fan:\([0-9]*\)\]): \([0-9]*\).*/\2/p' | paste -sd';'
@@ -303,9 +376,10 @@ sampler() {   # sampler PHASE CSV
     local ph=$1 out=$2 t0 n=0 line rpm=""
     t0=$(date +%s.%N)
     while :; do
-        line=$(smi --query-gpu="$SMI_FIELDS" --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' | expand_line)
-        # Lüfter-RPM nur alle 3 s (nvidia-settings ist langsam)
-        if [ $((n % 3)) -eq 0 ]; then rpm=$(fan_rpm_now); fi
+        if [ "$VENDOR" = amd ]; then line=$(amd_line)
+        else line=$(smi --query-gpu="$SMI_FIELDS" --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' | expand_line); fi
+        # Lüfter-RPM nur alle 3 s (nvidia-settings ist langsam; AMD: jede Sekunde)
+        if [ $((n % 3)) -eq 0 ] || [ "$VENDOR" = amd ]; then rpm=$(fan_rpm_now); fi
         printf '%.1f,%s,%s,%s,%s,%s\n' "$(echo "$(date +%s.%N) - $t0" | bc)" "$ph" "$line" \
             "$(vram_temp_now)" "$rpm" "$(hotspot_now)" >> "$out"
         n=$((n+1))
@@ -361,18 +435,34 @@ flt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a<b)}'; }
 say "gpu-check.sh $VERSION   Modus: $MODE   Start: $START_ISO"
 say "Dauer: Idle ${T_IDLE}s, VRAM $([ $DO_MEMTEST = 1 ] && echo ${T_MEMTEST}s || echo aus), CUDA $([ $DO_BURN = 1 ] && echo ${T_BURN}s || echo aus), Vulkan $([ $DO_GL = 1 ] && echo ${T_GL}s || echo aus)"
 say "Host: $(cat /sys/class/dmi/id/sys_vendor 2>/dev/null) $(cat /sys/class/dmi/id/product_name 2>/dev/null) / Board $(cat /sys/class/dmi/id/board_vendor 2>/dev/null) $(cat /sys/class/dmi/id/board_name 2>/dev/null)"
-say "Kernel $(uname -r), Treiber $(cat /sys/module/nvidia/version 2>/dev/null || echo 'nicht geladen')"
 
 # ============================================================ 1. Identifikation
 phase "1. Karte identifizieren"
 
 mapfile -t NV_BDFS < <(lspci -D -d 10de: -n | awk '$2 ~ /^03/ {print $1}')
-if [ ${#NV_BDFS[@]} -eq 0 ]; then
-    result "PCIe-Erkennung" FAIL "Keine NVIDIA-Grafikkarte am PCIe-Bus (Stecker? Steckplatz? Karte tot?)"
+# AMD: nur Steckkarten. Navi-Karten (RDNA2–4) hängen hinter einem AMD-PCIe-Switch auf der
+# Karte; die integrierte Grafik eines Ryzen-Prozessors (ebenfalls 1002, amdgpu) nicht.
+mapfile -t AMD_BDFS < <(lspci -D -d 1002: -n | awk '$2 ~ /^03/ {print $1}' | while read -r b; do
+    p=$(dirname "$(readlink -f "$PCI_SYSFS/$b")")
+    [ "$(cat "$p/vendor" 2>/dev/null)" = 0x1002 ] && echo "$b"
+done)
+if [ ${#NV_BDFS[@]} -gt 0 ]; then
+    VENDOR=nvidia
+    [ ${#AMD_BDFS[@]} -gt 0 ] && say "Hinweis: NVIDIA- und AMD-Karte gefunden – geprüft wird die NVIDIA-Karte. Für eindeutige Ergebnisse nur die Testkarte einbauen."
+    [ ${#NV_BDFS[@]} -gt 1 ] && say "Hinweis: ${#NV_BDFS[@]} NVIDIA-GPUs gefunden – geprüft wird nur --gpu $GPU. Für eindeutige Ergebnisse nur die Testkarte einbauen."
+elif [ ${#AMD_BDFS[@]} -gt 0 ]; then
+    VENDOR=amd
+    [ ${#AMD_BDFS[@]} -gt 1 ] && say "Hinweis: ${#AMD_BDFS[@]} AMD-GPUs gefunden – geprüft wird nur --gpu $GPU. Für eindeutige Ergebnisse nur die Testkarte einbauen."
+else
+    result "PCIe-Erkennung" FAIL "Keine NVIDIA- oder AMD-Grafikkarte am PCIe-Bus (Stecker? Steckplatz? Karte tot?)"
     lspci -nn >> "$LOG"
     FATAL=1
 fi
-[ ${#NV_BDFS[@]} -gt 1 ] && say "Hinweis: ${#NV_BDFS[@]} NVIDIA-GPUs gefunden – geprüft wird nur --gpu $GPU. Für eindeutige Ergebnisse nur die Testkarte einbauen."
+if [ "$VENDOR" = amd ]; then
+    say "Kernel $(uname -r), Treiber amdgpu (im Kernel), Vulkan $(dpkg-query -W -f '${Version}' mesa-vulkan-drivers 2>/dev/null | sed 's/^/Mesa /')"
+else
+    say "Kernel $(uname -r), Treiber $(cat /sys/module/nvidia/version 2>/dev/null || echo 'nicht geladen')"
+fi
 
 FATAL=${FATAL:-0}
 # Report aus /tmp auf den Stick verschieben (Ordnername mit Kartenname)
@@ -400,7 +490,24 @@ smi_find_gpu() {
       echo "nvidia-smi (ohne Optionen):"; nvidia-smi 2>&1 | head -30; } >> "$LOG"
     return 1
 }
-if [ $FATAL = 0 ] && ! smi_find_gpu; then
+# AMD: Treiber muss die Karte übernommen haben (DRM-Gerät mit hwmon)
+if [ "$VENDOR" = amd ] && [ ${FATAL:-0} = 0 ]; then
+    BDF=${AMD_BDFS[$GPU]:-}
+    if [ -z "$BDF" ]; then
+        result "Treiber" FAIL "Karte --gpu $GPU nicht vorhanden (${#AMD_BDFS[@]} AMD-Karte(n) gefunden)"; FATAL=1
+    else
+        SYS=$PCI_SYSFS/$BDF
+        HW=$(ls -d "$SYS"/hwmon/hwmon* 2>/dev/null | head -1)
+        if [ "$(basename "$(readlink "$SYS/driver" 2>/dev/null)")" != amdgpu ] || [ -z "$HW" ]; then
+            say "amdgpu hat die Karte nicht übernommen. Diagnose:"
+            lspci -s "$BDF" -nnk -vv >> "$LOG" 2>&1
+            journalctl -k -b --no-pager 2>/dev/null | grep -Ei 'amdgpu|radeon' | tail -40 | tee -a "$LOG"
+            result "Treiber" FAIL "amdgpu-Treiber hat die Karte nicht initialisiert (Details im Report) – starker Defektverdacht"
+            FATAL=1
+        fi
+    fi
+fi
+if [ "$VENDOR" = nvidia ] && [ ${FATAL:-0} = 0 ] && ! smi_find_gpu; then
     BDF=${NV_BDFS[0]}
     say "nvidia-smi liefert Karte $GPU nicht. Diagnose:"
     lspci -s "$BDF" -nnk -vv >> "$LOG" 2>&1
@@ -419,11 +526,48 @@ if [ $FATAL = 1 ]; then
     # auch ohne funktionierende Karte den Report sichern (Beleg für den Verkäufer)
     if [ ${#NV_BDFS[@]} -gt 0 ]; then
         move_report "NVIDIA_$(lspci -s "${NV_BDFS[0]}" -n | awk '{print $3}' | tr ':' '-')_ohne_Treiber"
+    elif [ ${#AMD_BDFS[@]} -gt 0 ]; then
+        move_report "AMD_$(lspci -s "${AMD_BDFS[0]}" -n | awk '{print $3}' | tr ':' '-')_ohne_Treiber"
     else
-        move_report "KEINE_NVIDIA_KARTE"
+        move_report "KEINE_GRAFIKKARTE"
     fi
 fi
-if [ $FATAL = 0 ]; then
+if [ $FATAL = 0 ] && [ "$VENDOR" = amd ]; then
+    VEN=$(cut -c3- "$SYS/vendor");   DEV=$(cut -c3- "$SYS/device")
+    SVEN=$(cut -c3- "$SYS/subsystem_vendor"); SDEV=$(cut -c3- "$SYS/subsystem_device")
+    SVEN_NAME=$(lspci -s "$BDF" -vmm | awk -F'\t' '/^SVendor:/{print $2}')
+    SDEV_NAME=$(lspci -s "$BDF" -vmm | awk -F'\t' '/^SDevice:/{print $2}')
+    # Name: Vulkan (RADV) kennt den Marketingnamen, lspci nur bei Referenz-Subsystem-IDs
+    NAME=$(VK_DRIVER_FILES="$AMD_ICD" timeout 20 vulkaninfo --summary 2>/dev/null \
+           | awk -F'= ' '/deviceName/{print $2; exit}' | sed 's/ *(RADV.*//')
+    [ -n "$NAME" ] || NAME="AMD $(lspci -s "$BDF" -vmm | awk -F'\t' '/^Device:/{print $2}')"
+    VBIOS=$(cat "$SYS/vbios_version" 2>/dev/null)
+    VRAM_MIB=$(rdiv "$SYS/mem_info_vram_total" 1048576)
+    GTT_MIB=$(rdiv "$SYS/mem_info_gtt_total" 1048576)
+    SERIAL=$(cat "$SYS/serial_number" 2>/dev/null); SERIAL=${SERIAL:-n/a}
+    UUID=$(cat "$SYS/unique_id" 2>/dev/null); UUID=${UUID:-n/a}
+    PARTNO=$(cat "$SYS/product_number" 2>/dev/null)
+    PL_ENF=$(rdiv "$HW/power1_cap" 1000000); PL_DEFAULT=$(rdiv "$HW/power1_cap_default" 1000000)
+    PL_MAX=$(rdiv "$HW/power1_cap_max" 1000000)
+    isnum "$PL_DEFAULT" || PL_DEFAULT=$PL_ENF
+    MAX_CLK=$(sed -n 's/^[0-9S]*: *\([0-9]*\)Mhz.*/\1/p' "$SYS/pp_dpm_sclk" 2>/dev/null | sort -n | tail -1)
+    BASE_CLK="n/a"
+    DISP_ACTIVE=No
+    for c in /sys/class/drm/card*-*; do
+        # Anschluss cardN-HDMI-A-1 gehört zu cardN; dessen device = PCI-Gerät der Karte
+        [ "$(readlink -f "${c%%-*}/device" 2>/dev/null)" = "$(readlink -f "$SYS")" ] || continue
+        [ "$(cat "$c/status" 2>/dev/null)" = connected ] && DISP_ACTIVE=Yes
+    done
+    LINK_SYS=$(amd_link_dev "$SYS")
+    ARCH=$(amd_arch "$DEV"); MEMTYPE=GDDR6; [ "$ARCH" = RDNA4 ] && MEMTYPE=GDDR6
+    set_limits "${ARCH:-RDNA}" "$MEMTYPE"
+    { echo "== hwmon $HW"; for f in "$HW"/*; do [ -f "$f" ] && printf '%s=%s\n' "$(basename "$f")" "$(cat "$f" 2>/dev/null)"; done
+      echo "== pp_dpm_sclk"; cat "$SYS/pp_dpm_sclk"; echo "== pp_dpm_mclk"; cat "$SYS/pp_dpm_mclk"
+    } > "$DIR/amdgpu-sysfs.txt" 2>&1
+    move_report "$NAME"
+fi
+if [ $FATAL = 0 ] && [ "$VENDOR" = nvidia ]; then
+    LINK_SYS=""
     BUSID=$(q1 pci.bus_id)                       # 00000000:01:00.0
     BDF=$(echo "$BUSID" | sed -E 's/^0*([0-9a-fA-F]{4}):/\1:/' | tr 'A-F' 'a-f')
     [ -e "$PCI_SYSFS/$BDF" ] || BDF=$(echo "$BUSID" | tr 'A-F' 'a-f' | sed -E 's/^0000//')
@@ -457,6 +601,9 @@ if [ $FATAL = 0 ]; then
 
     # Report-Ordner jetzt mit Kartenname anlegen
     move_report "$NAME"
+fi
+if [ $FATAL = 0 ]; then
+    LINK_SYS=${LINK_SYS:-$SYS}
 
     say "  Name           : $NAME   (Architektur: ${ARCH:-?}, VRAM-Typ: $MEMTYPE)"
     say "  PCI-Adresse    : $BDF"
@@ -468,13 +615,14 @@ if [ $FATAL = 0 ]; then
     say "  Part Number    : ${PARTNO:-n/a}"
     say "  UUID           : $UUID"
     say "  Power-Limit    : aktiv $PL_ENF W / default $PL_DEFAULT W / max $PL_MAX W"
-    say "  Takt           : Basis $BASE_CLK MHz / max $MAX_CLK MHz"
+    if [ "$VENDOR" = amd ]; then say "  Takt           : max $MAX_CLK MHz (höchste DPM-Stufe)   GTT: ${GTT_MIB:-?} MiB"
+    else say "  Takt           : Basis $BASE_CLK MHz / max $MAX_CLK MHz"; fi
     lspci -s "$BDF" -nn -vvv > "$DIR/lspci.txt" 2>&1
 
-    [ "$VEN" = 10de ] && result "Identifikation" PASS "$NAME, $VEN:$DEV, Sub $SVEN:$SDEV, VBIOS $VBIOS" \
-                      || result "Identifikation" FAIL "Vendor-ID $VEN ist nicht NVIDIA"
+    case "$VEN" in 10de|1002) result "Identifikation" PASS "$NAME, $VEN:$DEV, Sub $SVEN:$SDEV, VBIOS $VBIOS" ;;
+                   *) result "Identifikation" FAIL "Vendor-ID $VEN ist weder NVIDIA noch AMD" ;; esac
 
-    EXP=$(expected_vram_gib "$DEV")
+    if [ "$VENDOR" = amd ]; then EXP=$(amd_expected_vram_gib "$DEV"); else EXP=$(expected_vram_gib "$DEV"); fi
     if [ -n "$EXP" ] && isnum "$VRAM_MIB"; then
         # nvidia-smi zeigt z. B. 24576 MiB (3090) oder 24564 MiB (4090) -> ±3 % Toleranz
         if awk -v m="$VRAM_MIB" -v e="$EXP" 'BEGIN{x=m/1024; exit !(x>=e*0.97 && x<=e*1.03)}'; then
@@ -494,8 +642,9 @@ if [ $FATAL = 0 ]; then
     esac
 
     # PCIe-Fähigkeiten: Karte und Steckplatz (Upstream-Bridge)
-    GPU_MAXGEN=$(gt2gen "$(cat $SYS/max_link_speed)"); GPU_MAXW=$(cat $SYS/max_link_width)
-    BR=$(basename "$(dirname "$(readlink -f $SYS)")")
+    # (AMD: LINK_SYS = Switch-Eingang der Karte, siehe amd_link_dev)
+    GPU_MAXGEN=$(gt2gen "$(cat $LINK_SYS/max_link_speed)"); GPU_MAXW=$(cat $LINK_SYS/max_link_width)
+    BR=$(basename "$(dirname "$(readlink -f $LINK_SYS)")")
     if [ -e "$PCI_SYSFS/$BR/max_link_speed" ]; then
         HOST_MAXGEN=$(gt2gen "$(cat $PCI_SYSFS/$BR/max_link_speed)")
         HOST_MAXW=$(cat $PCI_SYSFS/$BR/max_link_width)
@@ -511,7 +660,13 @@ if [ $FATAL = 0 ]; then
     SB=$(mokutil --sb-state 2>/dev/null | head -1)
     say "  Secure Boot    : ${SB:-unbekannt};  Kernel-Lockdown: $(cat /sys/kernel/security/lockdown 2>/dev/null || echo n/a)"
     VRAM_NOTE=""; HOT_NOTE=""
-    if [ -x "$GPUTEMPS_BIN" ]; then
+    if [ "$VENDOR" = amd ]; then
+        # amdgpu liefert edge/junction/mem direkt über hwmon – unabhängig von Secure Boot
+        [ -n "$(vram_temp_now)" ] || VRAM_NOTE="nicht auslesbar: amdgpu meldet keinen VRAM-Sensor (temp3)"
+        [ -n "$(hotspot_now)" ]   || HOT_NOTE="nicht auslesbar: amdgpu meldet keinen Hotspot-Sensor (temp2)"
+        say "  VRAM-Temp      : $(vram_temp_now) °C${VRAM_NOTE:+ – $VRAM_NOTE}"
+        say "  Hotspot        : $(hotspot_now) °C${HOT_NOTE:+ – $HOT_NOTE}"
+    elif [ -x "$GPUTEMPS_BIN" ]; then
         GPUTEMPS_RAW="$TMPDIR_RUN.gputemps.json"   # Rohstrom nur in /tmp (tmpfs), Fehler landen im Report
         "$GPUTEMPS_BIN" --json --device "$GPU" --refresh-ms 1000 > "$GPUTEMPS_RAW" 2> "$DIR/gputemps.err" &
         GTPID=$!; BG_PIDS+=($GTPID); sleep 3
@@ -532,7 +687,9 @@ if [ $FATAL = 0 ]; then
     fi
     [ -s "$DIR/gputemps.err" ] || rm -f "$DIR/gputemps.err"
     # Lüfter-RPM über nvidia-settings möglich?
-    if [ -n "${DISPLAY:-}" ] && command -v nvidia-settings >/dev/null; then
+    if [ "$VENDOR" = amd ]; then
+        [ -r "$HW/fan1_input" ] && FAN_RPM_OK=1
+    elif [ -n "${DISPLAY:-}" ] && command -v nvidia-settings >/dev/null; then
         FAN_RPM_OK=1; [ -n "$(fan_rpm_now)" ] || FAN_RPM_OK=0
     fi
     say "  Lüfter-RPM     : $([ $FAN_RPM_OK = 1 ] && echo "auslesbar ($(fan_rpm_now | tr ';' ' ') RPM)" || echo 'nicht auslesbar (nur %-Sollwert)')"
@@ -541,8 +698,10 @@ fi
 # ===================================================================== Tests ==
 CSV="$DIR/monitor.csv"
 if [ $FATAL = 0 ]; then
-    smi -pm 1 >/dev/null 2>&1   # Persistence Mode (verhindert Treiber-Entladen zwischen Phasen)
-    probe_fields
+    if [ "$VENDOR" = nvidia ]; then
+        smi -pm 1 >/dev/null 2>&1   # Persistence Mode (verhindert Treiber-Entladen zwischen Phasen)
+        probe_fields
+    fi
 
     # ------------------------------------------------------------ 2. Leerlauf
     phase "2. Leerlauf (${T_IDLE}s)"
@@ -573,12 +732,22 @@ if [ $FATAL = 0 ]; then
             result "VRAM-Test" SKIP "memtest_vulkan nicht gefunden"
         else
             start_sampler memtest "$DIR/memtest.csv"; MT_T0=$SECONDS
-            # Nur den NVIDIA-Vulkan-Treiber laden (sonst wählt memtest evtl. iGPU/llvmpipe).
+            # Nur den Vulkan-Treiber der Testkarte laden (sonst wählt memtest evtl. iGPU/llvmpipe).
             # Argument "1" = erstes Gerät, nicht-interaktiver Modus. SIGTERM beendet sauber
             # (SIGINT wird an Hintergrundjobs nicht-interaktiver Shells ignoriert vererbt).
             # Exit-Code = Status-Bits: 0x40 Signatur | 0x01 Init ok | 0x02 Fehler | 0x04 Abbruch | 0x10 Stop angefordert
-            ( cd "$DIR" && VK_DRIVER_FILES="$NV_ICD" VK_ICD_FILENAMES="$NV_ICD" \
-                timeout --preserve-status -s TERM -k 30 "$T_MEMTEST" "$MEMTEST_BIN" 1 ) \
+            # AMD (RADV): memtest will sonst den ganzen VRAM am Stück und bricht ab (Exit 68), wenn
+            # das nicht geht. Grenze ist der kleinere Wert aus VRAM und GTT (= halber Arbeitsspeicher),
+            # davon 90 % (RX 6900 XT 16 GB, PC mit 16 GB RAM: 8,0 GB ok, 8,6 GB nicht; 2026-11-06).
+            MT_ARGS=1; ICD=$NV_ICD
+            if [ "$VENDOR" = amd ]; then
+                ICD=$AMD_ICD
+                MT_MIB=$(awk -v v="$VRAM_MIB" -v g="${GTT_MIB:-0}" 'BEGIN{m=v; if (g>0 && g<m) m=g; printf "%.0f", m*0.9}')
+                MT_ARGS="1 $((MT_MIB * 1048576))"
+                say "  Testgröße ${MT_MIB} MiB (90 % von min(VRAM ${VRAM_MIB}, GTT ${GTT_MIB:-?}) MiB)"
+            fi
+            ( cd "$DIR" && VK_DRIVER_FILES="$ICD" VK_ICD_FILENAMES="$ICD" \
+                timeout --preserve-status -s TERM -k 30 "$T_MEMTEST" "$MEMTEST_BIN" $MT_ARGS ) \
                 > "$DIR/memtest_vulkan.out" 2>&1 &
             MPID=$!; BG_PIDS+=($MPID)
             while kill -0 $MPID 2>/dev/null; do
@@ -612,7 +781,10 @@ if [ $FATAL = 0 ]; then
     fi
 
     # ------------------------------------------------------------ 4. CUDA-Volllast
-    if [ $DO_BURN = 1 ] && [ $ABORTED = 0 ]; then
+    if [ $DO_BURN = 1 ] && [ $ABORTED = 0 ] && [ "$VENDOR" = amd ]; then
+        phase "4. CUDA-Volllast (nur NVIDIA)"
+        result "CUDA-Last" INFO "entfällt bei AMD – memtest_vulkan lastet die Karte bis zum Power-Limit aus (Bewertung unten)"
+    elif [ $DO_BURN = 1 ] && [ $ABORTED = 0 ]; then
         phase "4. CUDA-Volllast gpu-burn (${T_BURN}s)"
         if [ ! -x "$GPUBURN_DIR/gpu_burn" ]; then
             result "CUDA-Last" SKIP "gpu_burn nicht gefunden"
@@ -626,7 +798,7 @@ if [ $FATAL = 0 ]; then
                 printf '\r  %s' "$(tail -1 "$DIR/burn.csv" | awk -F, '{printf "%4.0fs  GPU %s°C  VRAM %s°C  %s MHz  %s W  Lüfter %s%%  PCIe Gen%s x%s  [%s]   ", $1,$3,($17==""?"-":$17),$5,$7,$9,$11,$12,$13}')"
                 # Stichprobe Link per sysfs zur Mitte der Last
                 if [ $MID_DONE = 0 ] && [ "$(tail -1 "$DIR/burn.csv" | cut -d, -f1 | cut -d. -f1)" -ge $((T_BURN/2)) ] 2>/dev/null; then
-                    SYS_LOAD_LINK="$(cat $SYS/current_link_speed) x$(cat $SYS/current_link_width)"; MID_DONE=1
+                    SYS_LOAD_LINK="$(cat $LINK_SYS/current_link_speed) x$(cat $LINK_SYS/current_link_width)"; MID_DONE=1
                 fi
                 sleep 2
             done; echo
@@ -655,7 +827,7 @@ if [ $FATAL = 0 ]; then
             # vkmark: Szenen in Endlosschleife (--run-forever), Vollbild, bis Zeitablauf.
             # immediate = ungebremst (maximale Last statt 60-fps-VSync)
             GL_T0=$SECONDS
-            runuser -u "$DESKTOP_USER" -- env DISPLAY="$DISPLAY" XAUTHORITY="$XA" VK_DRIVER_FILES="$NV_ICD" \
+            runuser -u "$DESKTOP_USER" -- env DISPLAY="$DISPLAY" XAUTHORITY="$XA" VK_DRIVER_FILES="$([ "$VENDOR" = amd ] && echo "$AMD_ICD" || echo "$NV_ICD")" \
                 timeout --preserve-status -s TERM -k 10 "$T_GL" \
                 vkmark --winsys xcb --fullscreen --present-mode immediate --run-forever \
                     -b vertex:duration=8 -b texture:duration=8 -b shading:shading=phong:duration=8 \
@@ -767,7 +939,10 @@ if [ $FATAL = 0 ]; then
         fi
 
         # --- Throttle-Gründe (NVML clocks_event_reasons Bits)
-        if [ $LOAD_OK = 1 ]; then
+        if [ "$VENDOR" = amd ]; then
+            result "Throttle-Gründe" INFO "bei AMD nicht ausgewertet – Bewertung über Takt, Leistung und Temperaturen"
+            S_SWT=0
+        elif [ $LOAD_OK = 1 ]; then
         S_PWR=$(throttle_pct "$LOAD" 4 "$WARM")       # 0x04 SW Power Cap
         S_HWS=$(throttle_pct "$LOAD" 8 "$WARM")       # 0x08 HW Slowdown
         S_SWT=$(throttle_pct "$LOAD" 32 "$WARM")      # 0x20 SW Thermal Slowdown
@@ -788,14 +963,21 @@ if [ $FATAL = 0 ]; then
         else result "Throttle-Gründe" SKIP "$NO_LOAD_MSG"; fi
 
         # --- Leistung (nur wenn CUDA-Last gelaufen ist; memtest zieht kein Power-Limit)
-        if [ "$LOADN" = burn.csv ] && isnum "$P_AVG" && isnum "$PL"; then
+        # AMD: memtest_vulkan zieht das volle Power-Limit (RX 6900 XT: 253 von 255 W) -> gilt als Volllast
+        FULLLOAD=0; { [ "$LOADN" = burn.csv ] || [ "$VENDOR" = amd ]; } && FULLLOAD=1
+        if [ $FULLLOAD = 1 ] && isnum "$P_AVG" && isnum "$PL"; then
             PCT=$(awk -v a="$P_AVG" -v b="$PL" 'BEGIN{printf "%.0f", 100*a/b}')
             if flt "$PCT" "$LIM_PWR_FAIL_PCT" && ! fge "$S_SWT" 10; then result "Leistungsaufnahme" FAIL "Ø ${P_AVG} W = ${PCT}% des Limits ${PL} W – Karte zieht keine Volllast"
             elif flt "$PCT" "$LIM_PWR_WARN_PCT"; then result "Leistungsaufnahme" WARN "Ø ${P_AVG} W = ${PCT}% des Limits ${PL} W"
             else result "Leistungsaufnahme" PASS "Ø ${P_AVG} W = ${PCT}% des Limits ${PL} W"; fi
         fi
         # --- Takt
-        if [ "$LOADN" = burn.csv ] && isnum "$C_AVG" && isnum "$BASE_CLK" && [ "${BASE_CLK%.*}" -gt 0 ]; then
+        if [ "$VENDOR" = amd ] && isnum "$C_AVG" && isnum "$MAX_CLK" && [ "$MAX_CLK" -gt 0 ]; then
+            PCT=$(awk -v a="$C_AVG" -v b="$MAX_CLK" 'BEGIN{printf "%.0f", 100*a/b}')
+            if flt "$PCT" "$LIM_CLK_FAIL_PCT"; then result "Takt unter Last" FAIL "Ø ${C_AVG} MHz = ${PCT}% des Höchsttakts ${MAX_CLK} MHz – Karte drosselt stark"
+            elif flt "$PCT" "$LIM_CLK_WARN_PCT"; then result "Takt unter Last" WARN "Ø ${C_AVG} MHz = ${PCT}% des Höchsttakts ${MAX_CLK} MHz"
+            else result "Takt unter Last" PASS "Ø ${C_AVG} MHz = ${PCT}% des Höchsttakts ${MAX_CLK} MHz"; fi
+        elif [ "$LOADN" = burn.csv ] && isnum "$C_AVG" && isnum "$BASE_CLK" && [ "${BASE_CLK%.*}" -gt 0 ]; then
             PCT=$(awk -v a="$C_AVG" -v b="$BASE_CLK" 'BEGIN{printf "%.0f", 100*a/b}')
             if flt "$PCT" "$LIM_CLK_FAIL_PCT"; then result "Takt unter Last" FAIL "Ø ${C_AVG} MHz = ${PCT}% des Basistakts ${BASE_CLK} MHz"
             elif flt "$PCT" "$LIM_CLK_WARN_PCT"; then result "Takt unter Last" WARN "Ø ${C_AVG} MHz unter Basistakt ${BASE_CLK} MHz"
@@ -815,7 +997,7 @@ if [ $FATAL = 0 ]; then
         fi
         fi
         # --- PCIe unter Last
-        say "  PCIe unter Last: nvidia-smi Gen${L_GEN} x${L_W}; sysfs-Stichprobe: ${SYS_LOAD_LINK:-n/a}"
+        say "  PCIe unter Last: Messung Gen${L_GEN} x${L_W}; sysfs-Stichprobe: ${SYS_LOAD_LINK:-n/a}"
         if [ $LOAD_OK = 0 ] || [ -z "$L_GEN$L_W" ]; then
             result "PCIe-Link Last" SKIP "$NO_LOAD_MSG"
         elif [ -n "$L_GEN" ] && [ "$L_GEN" -lt "$WANT_GEN" ] 2>/dev/null; then
@@ -829,7 +1011,7 @@ if [ $FATAL = 0 ]; then
 fi
 
 # ===================================================================== 7. Kernel-Log
-phase "7. Kernel-Log (Xid / PCIe-AER)"
+phase "7. Kernel-Log ($([ "$VENDOR" = amd ] && echo amdgpu || echo Xid) / PCIe-AER)"
 journalctl -k -b --no-pager -o short-iso > "$DIR/kernel.log" 2>/dev/null || dmesg -T > "$DIR/kernel.log"
 XID_ALL=$(grep -c 'NVRM: Xid' "$DIR/kernel.log")
 XID_RUN=$(journalctl -k -b --no-pager --since "@$START_EPOCH" 2>/dev/null | grep 'NVRM: Xid')
@@ -838,7 +1020,22 @@ AER_UNC=$(grep -ciE 'AER:.*(Uncorrect|Fatal)' "$DIR/kernel.log")
 AER_COR=$(grep -ciE 'AER:.*Corrected' "$DIR/kernel.log")
 OFFBUS=$(grep -ci 'fallen off the bus' "$DIR/kernel.log")
 grep -E 'NVRM: Xid|AER:|fallen off' "$DIR/kernel.log" | tail -30 >> "$LOG"
-if [ "$OFFBUS" -gt 0 ]; then result "Xid-Fehler" FAIL "GPU ist vom Bus gefallen (Xid 79) – Stromversorgung/Defekt"
+if [ "$VENDOR" = amd ]; then
+    # amdgpu: Ring-Timeout / GPU-Reset / Seitenfehler = Absturz der Karte unter Last
+    AMD_RUN=$(journalctl -k -b --no-pager --since "@$START_EPOCH" 2>/dev/null \
+              | grep -iE 'amdgpu.*(ring .*timeout|gpu reset|GPU recovery|page fault|VM_L2_PROTECTION|\*ERROR\*)')
+    AMD_ALL=$(grep -ciE 'amdgpu.*(ring .*timeout|gpu reset|GPU recovery|page fault|VM_L2_PROTECTION)' "$DIR/kernel.log")
+    printf '%s\n' "$AMD_RUN" | tail -30 >> "$LOG"
+    if printf '%s' "$AMD_RUN" | grep -qiE 'ring .*timeout|gpu reset|GPU recovery|page fault|VM_L2_PROTECTION'; then
+        result "GPU-Fehler (amdgpu)" FAIL "Absturz/Reset der Karte während des Tests (Details im Report)"
+    elif [ -n "$AMD_RUN" ]; then
+        result "GPU-Fehler (amdgpu)" WARN "$(printf '%s\n' "$AMD_RUN" | grep -c .) Fehlermeldungen des Treibers während des Tests"
+    elif [ "$AMD_ALL" -gt 0 ]; then
+        result "GPU-Fehler (amdgpu)" WARN "$AMD_ALL Treiber-Fehler seit Boot, aber nicht während des Tests"
+    else
+        result "GPU-Fehler (amdgpu)" PASS "keine Abstürze/Resets im Kernel-Log"
+    fi
+elif [ "$OFFBUS" -gt 0 ]; then result "Xid-Fehler" FAIL "GPU ist vom Bus gefallen (Xid 79) – Stromversorgung/Defekt"
 elif [ "$XID_RUN_N" -gt 0 ]; then result "Xid-Fehler" FAIL "$XID_RUN_N Xid während des Tests: $(echo "$XID_RUN" | grep -o 'Xid ([^)]*): [0-9]*' | awk '{print $NF}' | sort -u | paste -sd,)"
 elif [ "$XID_ALL" -gt 0 ]; then result "Xid-Fehler" WARN "$XID_ALL Xid seit Boot, aber nicht während des Tests"
 else result "Xid-Fehler" PASS "keine Xid-Meldungen"; fi

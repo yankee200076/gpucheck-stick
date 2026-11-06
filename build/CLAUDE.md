@@ -1,7 +1,8 @@
 # GPU-Check-Stick – Kontext für Claude Code
 
 Du läufst auf einem bootfähigen USB-Stick (aus dem Image gpucheck.img.xz), mit dem gebrauchte
-NVIDIA-Grafikkarten (Ampere/Ada/Blackwell) vor dem Kauf geprüft werden. Antworte auf Deutsch.
+NVIDIA-Grafikkarten (Ampere/Ada/Blackwell) und seit v1.5 AMD-Karten (RDNA2–4, amdgpu/RADV) vor dem
+Kauf geprüft werden. Antworte auf Deutsch.
 Benutzer `gpu` (Passwort `gpu`), `sudo` ohne Passwort.
 
 ## System
@@ -49,9 +50,15 @@ Benutzer `gpu` (Passwort `gpu`), `sudo` ohne Passwort.
 - v1.4 real verifiziert (RTX 3090, 2026-10-27, Quick, GESAMT PASS): gputemps liefert VRAM (max 96 °C) und Hotspot
   (max 93 °C, Ø 18,6 °C über Kern bei 345 W); Desktop-Layout auf 2560×1440 korrekt.
   Offen: Grenzwert-Kalibrierung mit mehr Karten (bisher nur eine 3090), Ada/Blackwell ungetestet.
+- v1.5: AMD-Unterstützung. Sensoren aus hwmon (temp1 Kante, temp2 Hotspot, temp3 VRAM, power1_average,
+  fan1_input), PCIe-Link am obersten 0x1002-Bridge-Port (Navi hat einen Switch auf der Karte),
+  memtest_vulkan mit RADV (`radeon_icd.json`) und Größe 90 % von min(VRAM, GTT) – dient auch als Volllast
+  (kein gpu-burn). Kernel-Log: ring timeout/GPU reset/page fault = FAIL. LightDM wartet per
+  `gpucheck-wait-gpu` auf den GPU-Treiber (sonst X-Absturz vor amdgpu → kein Autologin). Neu: btop, net-tools.
+  Real verifiziert: RX 6900 XT am MSI B450, Quick, alles PASS (255 W, Hotspot max 88 °C, VRAM max 74 °C).
 
 ## Hinweise zur Fehlersuche
-- Kernel-Log: `journalctl -k -b | grep -Ei 'nvrm|xid|nvidia'`
+- Kernel-Log: `journalctl -k -b | grep -Ei 'nvrm|xid|nvidia|amdgpu'`
 - Feldnamen prüfen: `nvidia-smi --help-query-gpu`
 - Skript-Ausgabe einzelner Teile: z. B. `gpu-check --quick --no-memtest --no-burn --no-gl`
 - Änderungen am Skript: vorher Kopie anlegen (`/opt/gpucheck/gpu-check.sh.bak`), danach
